@@ -9,14 +9,14 @@ from time import monotonic
 
 from PySide6.QtCore import QDateTime, QThread, QTimeZone, QTimer, Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDateTimeEdit, QFileDialog, QFormLayout,
+    QAbstractItemView, QComboBox, QDateTimeEdit, QDialog, QFileDialog, QFormLayout,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QSlider, QSpinBox, QSplitter, QTabWidget,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSlider, QSpinBox, QSplitter, QTabWidget,
     QTableView, QVBoxLayout, QWidget,
 )
 
 from orbit_wizard_blue.data import DataService
-from orbit_wizard_blue.models import DataSnapshot, OrbitRequest, OrbitResult
+from orbit_wizard_blue.models import DataSnapshot, EarthData, OrbitRequest, OrbitResult
 
 from .orbit_view import OrbitView
 from .tables import OrbitTableModel
@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
         self.service = service if service is not None else DataService()
         self.snapshot: DataSnapshot | None = None
         self.result: OrbitResult | None = None
+        self.current_earth_data: EarthData | None = None
         self._worker: TaskWorker | None = None
         self._thread: QThread | None = None
         self._pending_close = False
@@ -85,6 +86,9 @@ class MainWindow(QMainWindow):
         self.refresh_button = QPushButton("자료 업데이트")
         self.refresh_button.clicked.connect(self.refresh_data)
         source.addWidget(self.refresh_button)
+        self.data_status_button = QPushButton("자료 상태…")
+        self.data_status_button.clicked.connect(self.show_data_status)
+        source.addWidget(self.data_status_button)
         self.source_status = QLabel("위성을 검색해 주세요.")
         self.source_status.setWordWrap(True)
         source.addWidget(self.source_status)
@@ -272,6 +276,58 @@ class MainWindow(QMainWindow):
             + (f"\n주의: {snapshot.warning}" if snapshot.warning else "")
         )
 
+    @staticmethod
+    def _snapshot_status(label: str, snapshot: DataSnapshot | None) -> str:
+        if snapshot is None:
+            return f"{label}: 없음"
+        return (f"{label}: {_name(snapshot)} · NORAD {_id(snapshot)}\n"
+                f"  요소시각 UTC: {snapshot.payload.get('EPOCH', '알 수 없음')}\n"
+                f"  수신 UTC: {snapshot.fetched_at or '알 수 없음'}\n"
+                f"  마지막 확인 UTC: {snapshot.checked_at or '알 수 없음'}\n"
+                f"  캐시 상태: {'오래됨' if snapshot.stale else '유효'}\n"
+                f"  출처: {snapshot.source_url}"
+                + (f"\n  주의: {snapshot.warning}" if snapshot.warning else ""))
+
+    @staticmethod
+    def _earth_status(label: str, provenance: dict) -> str:
+        names = (("iers", "IERS 지구 회전"), ("leap_seconds", "윤초"))
+        lines = [label]
+        for key, title in names:
+            info = provenance.get(key, {})
+            if not info:
+                lines.append(f"  {title}: 없음")
+                continue
+            kind = "동봉 자료" if info.get("kind") == "bundled" else "다운로드 자료"
+            cache = "오래됨" if info.get("stale") else "유효"
+            lines.extend((f"  {title}: {kind} · 캐시 {cache}",
+                          f"    수신 UTC: {info.get('fetched_at') or '동봉 자료/알 수 없음'}",
+                          f"    마지막 확인 UTC: {info.get('checked_at') or '동봉 자료/알 수 없음'}",
+                          f"    출처: {info.get('source_url') or '알 수 없음'}"))
+        return "\n".join(lines)
+
+    def show_data_status(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("자료 상태")
+        dialog.resize(680, 480)
+        layout = QVBoxLayout(dialog)
+        details = QPlainTextEdit()
+        details.setReadOnly(True)
+        current_earth = self.current_earth_data.provenance if self.current_earth_data else {}
+        result_earth = self.result.provenance.get("earth_data", {}) if self.result else {}
+        details.setPlainText("\n\n".join((
+            self._snapshot_status("현재 선택 GP 자료", self.snapshot),
+            self._earth_status("현재 지구 참조 자료", current_earth),
+            self._snapshot_status("표시된 계산 결과의 GP 자료", self.result.satellite if self.result else None),
+            self._earth_status("표시된 계산 결과의 지구 참조 자료", result_earth),
+        )) + (f"\n\n현재 참조 자료 주의: {self.current_earth_data.warning}"
+              if self.current_earth_data and self.current_earth_data.warning else ""))
+        layout.addWidget(details)
+        close_button = QPushButton("닫기")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        self.data_status_dialog = dialog
+        dialog.show()
+
     def refresh_data(self) -> None:
         snapshot = self.snapshot
         if snapshot is None:
@@ -289,6 +345,7 @@ class MainWindow(QMainWindow):
     def _refresh_done(self, value) -> None:
         snapshot, earth = value
         self.snapshot = snapshot
+        self.current_earth_data = earth
         current = self.matches.currentItem()
         if current is not None:
             current.setData(Qt.UserRole, snapshot)
@@ -327,11 +384,15 @@ class MainWindow(QMainWindow):
             current_snapshot = self.service.resolve_satellite(snapshot, cancel=cancel)
             progress(2, "지구 회전 자료 확인 중…")
             earth = self.service.get_earth_data(cancel=cancel)
-            return compute_ephemeris(current_snapshot, request, earth, progress=progress, cancel=cancel)
+            return compute_ephemeris(current_snapshot, request, earth, progress=progress, cancel=cancel), earth
 
         self._start_task("궤도 계산 중…", task, self._calculation_done)
 
-    def _calculation_done(self, result: OrbitResult) -> None:
+    def _calculation_done(self, value: OrbitResult | tuple[OrbitResult, EarthData]) -> None:
+        if isinstance(value, tuple):
+            result, self.current_earth_data = value
+        else:
+            result = value
         self.result = result
         self.snapshot = result.satellite
         current = self.matches.currentItem()

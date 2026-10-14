@@ -120,6 +120,8 @@ def test_invalid_refresh_retains_last_good_and_does_not_freshen(tmp_path):
     assert stale.sha256 == old.sha256
     assert stale.checked_at == old.checked_at
     service.get_satellite("12345")
+    assert calls == 2
+    service.get_satellite("12345", force=True)
     assert calls == 3
 
 
@@ -251,6 +253,43 @@ def test_earth_data_uses_bundled_files_offline_without_implicit_download(tmp_pat
     assert earth.provenance["leap_seconds"]["kind"] == "bundled"
     assert len(iers.IERS_A.open(str(earth.iers_path))) > 0
     assert len(iers.LeapSeconds.open(str(earth.leap_seconds_path))) > 0
+
+
+def test_offline_earth_failure_waits_two_hours_but_manual_force_retries(tmp_path):
+    from astropy.utils import iers
+
+    now = [datetime(2026, 10, 15, tzinfo=timezone.utc)]
+    attempts = []
+    online = [False]
+
+    def opener(request, timeout):
+        attempts.append(request.full_url)
+        if not online[0]:
+            raise URLError("offline")
+        payload = Path(
+            iers.IERS_A_FILE if "finals2000A" in request.full_url else iers.IERS_LEAP_SECOND_FILE
+        ).read_bytes()
+        return Response(payload)
+
+    service = DataService(tmp_path, opener=opener, clock=lambda: now[0])
+    first = service.get_earth_data()
+    assert first.provenance["iers"]["kind"] == "bundled"
+    assert len(attempts) == 2
+    restarted = DataService(tmp_path, opener=opener, clock=lambda: now[0])
+    second = restarted.get_earth_data()
+    assert second.provenance["leap_seconds"]["kind"] == "bundled"
+    assert len(attempts) == 2
+    now[0] += timedelta(seconds=CACHE_SECONDS)
+    restarted.get_earth_data()
+    assert len(attempts) == 4
+    online[0] = True
+    refreshed = restarted.get_earth_data(force=True)
+    assert len(attempts) == 6
+    assert refreshed.provenance["iers"]["kind"] == "downloaded"
+    assert refreshed.provenance["leap_seconds"]["kind"] == "downloaded"
+    assert not list(tmp_path.glob("*.failure.json"))
+    restarted.get_earth_data()
+    assert len(attempts) == 6
 
 
 def test_earth_refresh_keeps_prior_result_files_unchanged(tmp_path):

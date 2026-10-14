@@ -1,10 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 """Portable one-directory Windows build."""
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 datas = (collect_data_files("astropy") + collect_data_files("astropy_iers_data")
          + collect_data_files("pyqtgraph"))
+for distribution in ("orbit-wizard-blue", "sgp4", "numpy", "astropy", "pyerfa"):
+    datas += copy_metadata(distribution)
 hiddenimports = collect_submodules("pyqtgraph.opengl") + collect_submodules("OpenGL")
 
 a = Analysis(

@@ -4,8 +4,45 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import sys
 import traceback
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+from platformdirs import user_log_dir
+
+
+def configure_logging(log_dir: Path | None = None) -> Path | None:
+    """Keep bounded diagnostic logs under the user's application data directory."""
+    logger = logging.getLogger("orbit_wizard_blue")
+    logger.setLevel(logging.INFO)
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        handler.close()
+    target_dir = log_dir or Path(os.environ.get("ORBIT_WIZARD_LOG_DIR") or user_log_dir("orbit-wizard-blue"))
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / "orbit-wizard-blue.log"
+        handler = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logger.addHandler(handler)
+        logger.info("Application logging started")
+        return path
+    except OSError:
+        logger.addHandler(logging.StreamHandler(sys.stderr))
+        logger.exception("Could not create application log directory: %s", target_dir)
+        return None
+
+
+def _install_exception_hook(log_path: Path | None) -> None:
+    def record_unhandled(exc_type, exc, tb):
+        logging.getLogger("orbit_wizard_blue").critical("Unhandled application exception; log: %s",
+                                                        log_path or "stderr", exc_info=(exc_type, exc, tb))
+        traceback.print_exception(exc_type, exc, tb)
+
+    sys.excepthook = record_unhandled
 
 
 def smoke_test() -> int:
@@ -46,6 +83,10 @@ def smoke_test() -> int:
     result = compute_ephemeris(snapshot, OrbitRequest(epoch, epoch + timedelta(minutes=2), 60), earth)
     if len(result.times_utc) != 3 or result.itrs_position_km is None or result.gcrs_position_km is None:
         raise RuntimeError(f"Orbit transform failed: {result.warnings}")
+    versions = {"orbit-wizard-blue": result.provenance.get("app_version"),
+                **result.provenance.get("libraries", {})}
+    if any(not value or value == "unknown" for value in versions.values()):
+        raise RuntimeError(f"Package metadata missing from bundle: {versions}")
     with TemporaryDirectory() as temp_dir:
         csv_path, metadata_path = export_ephemeris(result, Path(temp_dir) / "smoke.csv")
         if not csv_path.read_bytes().startswith(b"\xef\xbb\xbf") or not metadata_path.exists():
@@ -73,15 +114,22 @@ def main() -> int:
 
             Path(args.smoke_output).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return result
+    log_path = configure_logging()
+    _install_exception_hook(log_path)
     from PySide6.QtWidgets import QApplication
 
     from orbit_wizard_blue.gui import MainWindow
 
-    app = QApplication(sys.argv)
-    app.setApplicationName("orbit-wizard-blue")
-    window = MainWindow()
-    window.show()
-    return app.exec()
+    try:
+        app = QApplication(sys.argv)
+        app.setApplicationName("orbit-wizard-blue")
+        window = MainWindow()
+        window.show()
+        return app.exec()
+    except Exception:
+        logging.getLogger("orbit_wizard_blue").exception("Application startup failed; log: %s",
+                                                         log_path or "stderr")
+        raise
 
 
 if __name__ == "__main__":

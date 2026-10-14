@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from threading import Event
 from typing import Callable
 
@@ -36,6 +37,7 @@ class TaskWorker(QObject):
         except CancelledError:
             self.cancelled.emit()
         except Exception as exc:
+            logging.getLogger("orbit_wizard_blue").exception("Background task failed")
             if self._cancel.is_set():
                 self.cancelled.emit()
             else:

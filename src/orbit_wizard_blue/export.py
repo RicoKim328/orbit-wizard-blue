@@ -15,7 +15,7 @@ from .models import OrbitResult
 
 
 _HEADER = (
-    "sample_index", "utc_iso8601",
+    "sample_index", "utc_iso8601", "satellite_name", "norad_id",
     "teme_x_km", "teme_y_km", "teme_z_km",
     "teme_vx_km_s", "teme_vy_km_s", "teme_vz_km_s",
     "itrs_x_km", "itrs_y_km", "itrs_z_km",
@@ -30,11 +30,14 @@ def _vector(array: Any, index: int) -> list[float | str]:
 
 
 def _write_csv(path: Path, result: OrbitResult) -> None:
+    satellite_name = result.satellite.payload.get("OBJECT_NAME", "")
+    norad_id = result.satellite.payload.get("NORAD_CAT_ID", "")
     with path.open("w", newline="", encoding="utf-8-sig") as stream:
         writer = csv.writer(stream)
         writer.writerow(_HEADER)
         for i, instant in enumerate(result.times_utc):
-            writer.writerow((i, instant, *_vector(result.teme_position_km, i), *_vector(result.teme_velocity_km_s, i),
+            writer.writerow((i, instant, satellite_name, norad_id,
+                             *_vector(result.teme_position_km, i), *_vector(result.teme_velocity_km_s, i),
                              *_vector(result.itrs_position_km, i), *_vector(result.itrs_velocity_km_s, i),
                              *_vector(result.geodetic_deg_km, i), *_vector(result.gcrs_position_km, i)))
 

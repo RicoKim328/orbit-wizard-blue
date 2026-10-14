@@ -293,13 +293,14 @@ class DataService:
                 warnings.append(f"{name}: using bundled data ({exc})")
         return EarthData(paths["iers"], paths["leap_seconds"], provenance, "; ".join(warnings))
 
-    def _paths(self, url: str, kind: str) -> tuple[Path, Path, Path]:
+    def _paths(self, url: str, kind: str) -> tuple[Path, Path, Path, Path]:
         stem = sha256(f"{kind}:{url}".encode()).hexdigest()
         extension = ".json" if kind.startswith("gp") else ".dat"
         return (
             self.cache_dir / f"{stem}{extension}",
             self.cache_dir / f"{stem}.meta.json",
             self.cache_dir / f"{stem}.throttle.json",
+            self.cache_dir / f"{stem}.failure.json",
         )
 
     def _read_cache(self, content_path: Path, meta_path: Path, url: str) -> tuple[bytes, dict[str, Any]] | None:
@@ -322,7 +323,7 @@ class DataService:
         validator: Callable[..., Any],
         cancel: Any,
     ) -> tuple[bytes, dict[str, Any], bool, str, Path]:
-        content_path, meta_path, throttle_path = self._paths(url, kind)
+        content_path, meta_path, throttle_path, failure_path = self._paths(url, kind)
         key = str(content_path)
         before = self._read_cache(content_path, meta_path, url)
         with _lock_for(key):
@@ -356,6 +357,21 @@ class DataService:
                 if cached is not None:
                     return raw, meta, True, message, _version_path(content_path, meta)
                 raise RuntimeError(message)
+            if not force:
+                try:
+                    failure = json.loads(failure_path.read_text(encoding="utf-8"))
+                    attempted = _parse_time(failure.get("last_attempt_at"))
+                except (OSError, ValueError, TypeError):
+                    attempted = None
+                    failure = {}
+                if attempted is not None and now < attempted + timedelta(seconds=CACHE_SECONDS):
+                    message = (
+                        f"Last refresh failed; retry after {_iso(attempted + timedelta(seconds=CACHE_SECONDS))}: "
+                        f"{failure.get('error', 'source unavailable')}"
+                    )
+                    if cached is not None:
+                        return raw, meta, True, message, _version_path(content_path, meta)
+                    raise RuntimeError(message)
             headers = {"User-Agent": "orbit-wizard-blue/1.0"}
             if cached is not None:
                 if meta.get("etag"):
@@ -372,6 +388,7 @@ class DataService:
                             raise ValidationError("Unexpected 304 without cached data")
                         new_meta = {**meta, "checked_at": _iso(now)}
                         _atomic_write(meta_path, json.dumps(new_meta).encode())
+                        failure_path.unlink(missing_ok=True)
                         return raw, new_meta, False, "", _version_path(content_path, new_meta)
                     if status != 200:
                         raise RuntimeError(f"HTTP {status}")
@@ -397,6 +414,7 @@ class DataService:
                     }
                     _atomic_write(_version_path(content_path, fresh_meta), fresh)
                     _atomic_write(meta_path, json.dumps(fresh_meta).encode())
+                    failure_path.unlink(missing_ok=True)
                     return fresh, fresh_meta, False, "", _version_path(content_path, fresh_meta)
                 finally:
                     response.close()
@@ -404,6 +422,7 @@ class DataService:
                 if exc.code == 304 and cached is not None:
                     new_meta = {**meta, "checked_at": _iso(now)}
                     _atomic_write(meta_path, json.dumps(new_meta).encode())
+                    failure_path.unlink(missing_ok=True)
                     return raw, new_meta, False, "", _version_path(content_path, new_meta)
                 if exc.code == 404 and kind == "gp_search":
                     empty = exc.read()
@@ -418,6 +437,7 @@ class DataService:
                         }
                         _atomic_write(_version_path(content_path, empty_meta), empty)
                         _atomic_write(meta_path, json.dumps(empty_meta).encode())
+                        failure_path.unlink(missing_ok=True)
                         return empty, empty_meta, False, "", _version_path(content_path, empty_meta)
                 if exc.code in (403, 429, 503):
                     retry = _retry_at(_header(exc.headers, "Retry-After"), now)
@@ -429,6 +449,7 @@ class DataService:
             except (OSError, URLError, ValueError, RuntimeError) as exc:
                 error = exc
             _check_cancel(cancel)
+            _atomic_write(failure_path, json.dumps({"last_attempt_at": _iso(now), "error": str(error)}).encode())
             if cached is not None:
                 return raw, meta, True, f"Refresh failed: {error}", _version_path(content_path, meta)
             raise RuntimeError(f"Data unavailable from {url}: {error}") from error
