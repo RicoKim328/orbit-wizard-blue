@@ -1,0 +1,14 @@
+orbit-wizard-blue bundles open-source libraries. This file lists the main
+third-party projects, their licenses, and where to obtain full license texts.
+Primary project pages and licenses:
+
+PySide6 / shiboken6: LGPL-3.0 or GPL-3.0, https://www.qt.io/licensing
+pyqtgraph: MIT, https://github.com/pyqtgraph/pyqtgraph
+PyOpenGL: BSD-style, https://pyopengl.sourceforge.net/
+NumPy: BSD-3-Clause, https://numpy.org/about/
+Astropy / astropy-iers-data / PyERFA: BSD-3-Clause, https://www.astropy.org/
+sgp4: MIT, https://pypi.org/project/sgp4/
+Requests: Apache-2.0, https://requests.readthedocs.io/
+platformdirs: MIT, https://github.com/tox-dev/platformdirs
+
+For exact package versions see requirements.txt.

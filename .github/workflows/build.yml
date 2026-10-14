@@ -1,0 +1,53 @@
+name: Windows portable build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install pinned dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+          .\.venv\Scripts\python.exe -m pip install --no-deps -e .
+      - name: Lint
+        run: .\.venv\Scripts\python.exe -m ruff check src tests tools
+      - name: Test without OpenGL
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ORBIT_WIZARD_DISABLE_3D: '1'
+        run: .\.venv\Scripts\python.exe -m pytest -q
+      - name: Build portable folder
+        run: .\.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm orbit-wizard-blue.spec
+      - name: Smoke test frozen executable
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP 'orbit-smoke.json'
+          $process = Start-Process -FilePath '.\dist\orbit-wizard-blue\orbit-wizard-blue.exe' -ArgumentList @('--smoke-test', '--smoke-output', $report) -Wait -PassThru
+          if ($process.ExitCode -ne 0) { if (Test-Path $report) { Get-Content $report }; exit $process.ExitCode }
+          if (-not (Test-Path $report)) { throw 'Smoke report was not written' }
+          $json = Get-Content $report -Raw | ConvertFrom-Json
+          if ($json.status -ne 'ok') { Get-Content $report; throw 'Smoke test failed' }
+      - name: Include documentation and license notices
+        shell: pwsh
+        run: |
+          Copy-Item README.md dist\orbit-wizard-blue\README.md
+          Copy-Item LICENSES.txt dist\orbit-wizard-blue\LICENSES.txt
+      - name: Create ZIP
+        shell: pwsh
+        run: Compress-Archive -Path dist\orbit-wizard-blue -DestinationPath dist\orbit-wizard-blue-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbit-wizard-blue-windows-x64
+          path: dist/orbit-wizard-blue-windows-x64.zip
+          if-no-files-found: error

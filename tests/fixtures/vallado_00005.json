@@ -1,0 +1,25 @@
+{
+  "source": "Vallado et al., Revisiting Spacetrack Report #3, AIAA 2006-6753 Rev 1, Appendix D/E",
+  "source_url": "https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev1.pdf",
+  "elements": {
+    "OBJECT_NAME": "VANGUARD 1",
+    "OBJECT_ID": "1958-002B",
+    "NORAD_CAT_ID": 5,
+    "EPOCH": "2000-06-27T18:50:19.733568",
+    "MEAN_MOTION": 10.82419157,
+    "ECCENTRICITY": 0.1859667,
+    "INCLINATION": 34.2682,
+    "RA_OF_ASC_NODE": 348.7242,
+    "ARG_OF_PERICENTER": 331.7664,
+    "MEAN_ANOMALY": 19.3264,
+    "BSTAR": 0.000028098,
+    "MEAN_MOTION_DOT": 0.00000023,
+    "MEAN_MOTION_DDOT": 0,
+    "REV_AT_EPOCH": 41366,
+    "ELEMENT_SET_NO": 475,
+    "EPHEMERIS_TYPE": 0,
+    "CLASSIFICATION_TYPE": "U"
+  },
+  "teme_at_epoch_km": [7022.46529266, -1400.08296755, 0.03995155],
+  "teme_velocity_at_epoch_km_s": [1.893841015, 6.405893759, 4.534807250]
+}

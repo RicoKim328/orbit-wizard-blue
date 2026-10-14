@@ -1,20 +1,34 @@
 # Repository Guidelines
 
+## Agent Roles & Coordination
+
+The project name is `orbit-wizard-blue`. Astra is the primary coordinator: it plans with the user, assigns work, reviews and integrates results, and manages verification. Sub-agents perform application implementation when assigned.
+
+The user has requested three sub-agents, all using `gpt-6-sol` with `medium` reasoning:
+
+- `gui`: PySide6 GUI, result tables, embedded 3D orbit visualization, and playback controls.
+- `backend_data`: CelesTrak data access, shared two-hour disk cache, manual refresh, and IERS/leap-second data management.
+- `backend_orbit`: SGP4 propagation, UTC time grids, coordinate conversion, result models, and CSV/metadata export.
+
+Only Astra may perform Git or GitHub operations. Sub-agents must not run `git` or `gh` commands (including read-only commands), access or modify `.git`, or perform repository operations through scripts, APIs, connectors, or other indirect methods. This includes staging, commits, branches, worktrees, fetch/pull/push, merges, tags, and pull requests. Ask Astra for any repository information or action needed.
+
+Sub-agents must work within their assigned files, coordinate shared interfaces through Astra, and report changes, verification results, and blockers. Do not spawn additional agents or begin implementation without a concrete assignment from Astra. Agent setup and role acknowledgement alone do not authorize implementation.
+
 ## Project Structure & Module Organization
 
-This repository currently has no application code, tests, assets, or project manifest. As files are added, keep implementation code together in a clearly named directory such as `src/`, place automated tests in `tests/`, and keep static assets in `assets/` only when needed. Document any different layout in the root README so contributors can find the entry point quickly.
+Application code lives in `src/orbit_wizard_blue/`: `data.py` handles external data/cache, `orbit.py` and `export.py` handle computation/export, `models.py` defines shared immutable data, and `gui/` contains PySide6 views. Tests live in `tests/`. The root README lists the entry point and file layout.
 
 ## Build, Test, and Development Commands
 
-No build, test, or local run commands are configured yet. When introducing a toolchain, add its manifest or configuration file to the repository and record the exact setup, run, build, and test commands here and in the README. Prefer commands that work from the repository root and state required runtime versions.
+Use Python 3.12. From the repository root on Linux/macOS: `python3.12 -m venv .venv`, `.venv/bin/python -m pip install -r requirements-dev.txt`, `.venv/bin/python -m pip install --no-deps -e .`, `.venv/bin/python -m orbit_wizard_blue`. On Windows replace the Python path with `.venv\Scripts\python.exe` and create the environment with `py -3.12 -m venv .venv`. Lint with `.venv/bin/python -m ruff check src tests tools`; test with `QT_QPA_PLATFORM=offscreen ORBIT_WIZARD_DISABLE_3D=1 .venv/bin/python -m pytest -q`; build Windows onedir with `.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm orbit-wizard-blue.spec`. More detail is in the README.
 
 ## Coding Style & Naming Conventions
 
-There is no established language style or formatter. Follow the conventions of the language and framework chosen for the first implementation, then commit formatter and linter configuration with that code. Use descriptive names, keep file naming consistent within each directory, and avoid formatting changes unrelated to the task. Document indentation and naming rules once a language is selected.
+Python uses four-space indentation, `snake_case` for files/functions/variables, and `PascalCase` for classes. Ruff configuration lives in `pyproject.toml`. Keep formatting changes related to the task.
 
 ## Testing Guidelines
 
-No test framework or coverage threshold is configured. Add focused tests for new behavior and bug fixes when testable code is introduced. Name tests after the behavior they verify, keep fixtures small, and document how to run the complete test suite. Do not claim coverage requirements until they are enforced by project tooling.
+Pytest and pytest-qt are configured. Run the complete suite with `QT_QPA_PLATFORM=offscreen ORBIT_WIZARD_DISABLE_3D=1 .venv/bin/python -m pytest -q` on Linux/macOS, or set the same environment variables in PowerShell and run `.venv\Scripts\python.exe -m pytest -q` on Windows. Keep fixtures small and name tests after the behavior they verify. No coverage threshold is enforced.
 
 ## Commit & Pull Request Guidelines
 
