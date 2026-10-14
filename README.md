@@ -2,6 +2,22 @@
 
 Windows 11 x64용 한국어 위성 궤도 데스크톱 앱입니다. CelesTrak GP JSON에서 공공 위성을 검색하고 SGP4로 지정된 UTC 구간의 위치와 속도를 계산합니다. TEME·ITRS 결과 표, 측지 위도·경도·고도 표, GCRS 또는 ITRS 3D 궤도, CSV와 계산 메타데이터를 제공합니다.
 
+## 앱 화면 미리보기
+
+![GCRS 관성 좌표계의 지구와 계산된 궤도, UTC 입력 및 재생 조작이 보이는 앱 메인 창](assets/screenshots/gcrs-window.png)
+
+3D 보기에서는 WGS84 지구·경위도 격자·궤적·선택 샘플의 위성을 함께 확인합니다. 아래 표는 같은 샘플의 UTC와 TEME 위치·속도를 표시합니다.
+
+![UTC별 TEME 위치와 속도가 표시된 결과 표](assets/screenshots/teme-table.png)
+
+**자료 상태…** 창에서는 현재 자료와 표시 중인 계산 결과에 사용된 GP·IERS·윤초 자료의 출처 및 캐시 상태를 비교할 수 있습니다.
+
+![GP, IERS, 윤초 자료의 출처와 캐시 상태를 보여 주는 자료 상태 창](assets/screenshots/data-status.png)
+
+추가 화면: [ITRS 지구 고정 3D 보기](assets/screenshots/itrs-window.png) · [ITRS 위치·속도 결과 표](assets/screenshots/itrs-table.png)
+
+이 화면은 Linux에서 실행한 앱을 **로컬 예제 GP 요소와 동봉 IERS 자료로 계산**해 캡처했습니다. 실제 위성의 관측값을 보여 주는 예시는 아니며, Windows에서는 창 테두리와 글꼴 모양이 다를 수 있습니다. 캡처는 `.venv/bin/python tools/capture_gui.py --output-dir assets/screenshots`로 재생성할 수 있습니다.
+
 ## 사용 방법
 
 1. `orbit-wizard-blue.exe`를 실행합니다. ZIP으로 받은 경우 폴더 전체를 먼저 압축 해제하세요.
@@ -60,6 +76,8 @@ Compress-Archive -Path dist\orbit-wizard-blue -DestinationPath dist\orbit-wizard
 - `src/orbit_wizard_blue/orbit.py`, `models.py`, `export.py`: 전파·좌표 변환·불변 결과·내보내기
 - `src/orbit_wizard_blue/gui/`: PySide6 화면, 3D 표시, 결과 표, 비동기 작업
 - `tests/`: 자동 테스트
+- `tools/capture_gui.py`: 오프라인 예제 계산으로 README 화면 캡처 생성
+- `assets/screenshots/`: 앱 화면 캡처 이미지
 - `orbit-wizard-blue.spec`: PyInstaller 폴더형 배포 설정
 
 Python 코드는 4칸 들여쓰기와 `snake_case` 함수/파일 이름, `PascalCase` 클래스 이름을 사용합니다. 외부 자료 조회와 궤도 계산은 작업 스레드에서 실행하며 3D 렌더링 중 네트워크를 호출하지 않습니다.
