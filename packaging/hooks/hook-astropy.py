@@ -17,6 +17,7 @@ datas += [entry for entry in collect_data_files("astropy", include_py_files=True
           if entry[0].endswith(("_parsetab.py", "_lextab.py"))]
 
 hiddenimports = ["numpy.lib.recfunctions"]
+excludedimports = ["astropy.visualization", "pytest"]
 for package in ("astropy.constants", "astropy.coordinates", "astropy.time", "astropy.units", "astropy.utils.iers",
                 "astropy.table", "astropy.io.ascii"):
     hiddenimports += collect_submodules(package, filter=_required_module, on_error="warn once")

@@ -7,7 +7,8 @@ datas = (collect_data_files("astropy") + collect_data_files("astropy_iers_data")
          + collect_data_files("pyqtgraph"))
 for distribution in ("orbit-wizard-blue", "sgp4", "numpy", "astropy", "pyerfa"):
     datas += copy_metadata(distribution)
-hiddenimports = collect_submodules("pyqtgraph.opengl") + collect_submodules("OpenGL")
+hiddenimports = collect_submodules("pyqtgraph.opengl") + collect_submodules(
+    "OpenGL", filter=lambda name: not name.startswith(("OpenGL.GLUT", "OpenGL.Tk", "OpenGL.osmesa")))
 
 a = Analysis(
     ["src/orbit_wizard_blue/__main__.py"],
@@ -18,9 +19,13 @@ a = Analysis(
     hookspath=["packaging/hooks"],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["astropy.visualization", "astropy.visualization.wcsaxes", "pytest",
+              "OpenGL.Tk", "OpenGL.GLUT"],
     noarchive=False,
 )
+for module_name, _, _ in a.pure:
+    if module_name == "astropy.visualization" or module_name.startswith("astropy.visualization."):
+        raise RuntimeError(f"Unused Astropy visualization module leaked into frozen analysis: {module_name}")
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
