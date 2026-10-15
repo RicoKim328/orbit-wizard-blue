@@ -25,6 +25,9 @@ class OrbitView(QWidget):
         self.available = False
         self._earth_items = []
         self._layout = QVBoxLayout(self)
+        self.orientation_note = QLabel("지구 방향 자료가 없어 지구와 경위도 격자를 숨겼습니다. 궤적은 GCRS입니다.")
+        self.orientation_note.setWordWrap(True)
+        self.orientation_note.hide()
         if os.environ.get("ORBIT_WIZARD_DISABLE_3D") == "1":
             self._layout.addWidget(QLabel("3D 표시가 비활성화되었습니다."))
             return
@@ -48,6 +51,7 @@ class OrbitView(QWidget):
             self.view.failed.connect(self._disable_3d)
             self.view.setBackgroundColor((9, 19, 36))
             self._layout.addWidget(self.view)
+            self._layout.addWidget(self.orientation_note)
             self.available = True
             self._build_earth()
             self.reset_camera()
@@ -71,6 +75,7 @@ class OrbitView(QWidget):
         self._layout.removeWidget(self.view)
         self.view.hide()
         self.view.deleteLater()
+        self.orientation_note.hide()
         self._layout.addWidget(QLabel(f"3D 표시를 사용할 수 없습니다: {reason}"))
 
     @staticmethod
@@ -171,9 +176,14 @@ class OrbitView(QWidget):
                 float(rotation[2, 0]), float(rotation[2, 1]), float(rotation[2, 2]), 0.0,
                 0.0, 0.0, 0.0, 1.0,
             ))
+        earth_orientation_available = (self.result is None or self.frame == "ITRS"
+                                       or self.result.earth_rotation is not None)
+        self.orientation_note.setVisible(not earth_orientation_available)
         for item in self._earth_items:
+            item.setVisible(earth_orientation_available)
             item.resetTransform()
-            item.applyTransform(matrix, local=False)
+            if earth_orientation_available:
+                item.applyTransform(matrix, local=False)
 
     def reset_camera(self) -> None:
         if self.available:

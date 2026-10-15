@@ -19,7 +19,9 @@ from PySide6.QtWidgets import QApplication, QHeaderView
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from orbit_wizard_blue.gui import MainWindow  # noqa: E402
+from orbit_wizard_blue.manual import KeplerianElements, ManualOrbitInput  # noqa: E402
 from orbit_wizard_blue.models import EarthData, OrbitRequest  # noqa: E402
+from orbit_wizard_blue.numerical import compute_manual_ephemeris  # noqa: E402
 from orbit_wizard_blue.orbit import compute_ephemeris  # noqa: E402
 from validate_orbit import build_fixture  # noqa: E402
 
@@ -51,6 +53,11 @@ def main() -> int:
     # the app computes the displayed trajectory from local example inputs.
     snapshot, request, earth = example_inputs()
     result = compute_ephemeris(snapshot, request, earth)
+    manual = ManualOrbitInput(
+        name="수동 궤도 예제", epoch_utc=request.start_utc,
+        elements=KeplerianElements(7000, 0.001, 51.6, 75, 120, 240), gravity_model="J2")
+    manual_request = OrbitRequest(request.start_utc, request.start_utc + timedelta(hours=3), 60)
+    manual_result = compute_manual_ephemeris(manual, manual_request, earth)
     if result.gcrs_position_km is None or result.itrs_position_km is None:
         raise RuntimeError(f"Offline example lacks required coordinate frames: {result.warnings}")
 
@@ -128,8 +135,35 @@ def main() -> int:
 
     def capture_status() -> None:
         if save("data-status.png", window.data_status_dialog):
+            window.data_status_dialog.close()
+            setup_manual()
+
+    def setup_manual() -> None:
+        controls = window.manual_input
+        window.source_tabs.setCurrentWidget(controls)
+        controls.name_edit.setText(manual.name)
+        controls.epoch_edit.setDateTime(QDateTime.fromSecsSinceEpoch(
+            int(manual.epoch_utc.timestamp()), QTimeZone.utc()))
+        for key in ("a_km", "e", "i_deg", "raan_deg", "argp_deg", "true_anomaly_deg"):
+            controls.element_edits[key].setValue(getattr(manual.elements, key))
+        window.end_edit.setDateTime(QDateTime.fromSecsSinceEpoch(
+            int(manual_request.end_utc.timestamp()), QTimeZone.utc()))
+        window._calculation_done((manual_result, earth))
+        window.resize(1600, 900)
+        window.frame_combo.setCurrentIndex(0)
+        window.tabs.setCurrentIndex(0)
+        window.set_sample_index(60)
+        QTimer.singleShot(750, capture_manual_window)
+
+    def capture_manual_window() -> None:
+        if save("manual-window.png", window):
+            window.tabs.setCurrentWidget(window.tables[2])
+            QTimer.singleShot(500, capture_manual_table)
+
+    def capture_manual_table() -> None:
+        if save("manual-gcrs-table.png", window):
             print(f"Saved gcrs-window.png, itrs-window.png, ground-track.png, teme-table.png, itrs-table.png, "
-                  f"data-status.png to {args.output_dir}")
+                  f"data-status.png, manual-window.png, manual-gcrs-table.png to {args.output_dir}")
             app.quit()
 
     QTimer.singleShot(2000, capture_gcrs)

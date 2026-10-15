@@ -37,7 +37,8 @@ def test_csv_bom_and_companion_metadata_match_result(tmp_path):
     assert records[0]["teme_x_km"] == "1.0"
     assert records[0]["itrs_x_km"] == ""
     metadata = json.loads(json_path.read_text(encoding="utf-8"))
-    assert metadata["schema_version"] == 2
+    assert metadata["schema_version"] == 3
+    assert metadata["native_frame"] == "TEME"
     assert metadata["source"]["kind"] == "local"
     assert metadata["source"]["format"] == "gp_json"
     assert metadata["source"]["metadata"] == {"origin": {"tags": ["fixture"]}}

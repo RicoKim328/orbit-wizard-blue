@@ -288,3 +288,77 @@ def test_online_favorite_rechecks_source_when_opened(window, qtbot, monkeypatch)
     assert callback_threads == [main_thread]
     assert window.snapshot.sha256 == "new-hash"
     assert window.source_tabs.currentWidget() is window.matches
+
+
+def test_manual_calculation_uses_gcrs_without_provider_or_earth_data(window, qtbot):
+    class NoEarthService:
+        def get_earth_data(self, *, cancel, status):
+            raise OSError("IERS unavailable")
+
+        def resolve_satellite(self, *args, **kwargs):
+            pytest.fail("manual calculation called CelesTrak")
+
+    window.service = NoEarthService()
+    previous_start = window._date_utc(window.start_edit)
+    window.source_tabs.setCurrentWidget(window.manual_input)
+    epoch = datetime(2026, 10, 15, tzinfo=timezone.utc)
+    window.manual_input.epoch_edit.setDateTime(
+        QDateTime.fromSecsSinceEpoch(int(epoch.timestamp()), QTimeZone.utc()))
+    window.end_edit.setDateTime(
+        QDateTime.fromSecsSinceEpoch(int((epoch + timedelta(seconds=120)).timestamp()), QTimeZone.utc()))
+    assert window.start_edit.isReadOnly()
+    assert window._date_utc(window.start_edit) == epoch
+    window.calculate()
+    qtbot.waitUntil(lambda: window._thread is None, timeout=10000)
+    assert window.result is not None
+    assert window.result.native_frame == "GCRS"
+    assert window.result.satellite.source_kind == "manual"
+    assert window.result.teme_position_km is None
+    assert window.result.itrs_position_km is None
+    assert window.result.gcrs_position_km is not None
+    assert window.models[2].data(window.models[2].index(0, 1), Qt.DisplayRole) != "—"
+    assert window.models[0].data(window.models[0].index(0, 1), Qt.DisplayRole) == "—"
+    assert not window.frame_combo.model().item(1).isEnabled()
+    assert "직접 입력" in window.result_summary.text()
+    assert window.recompute_notice.text() == ""
+    window.manual_input.element_edits["a_km"].setValue(7100)
+    assert "직접 입력 궤도/힘 모델" in window.recompute_notice.text()
+    window.manual_input.element_edits["a_km"].setValue(7000)
+    assert window.recompute_notice.text() == ""
+    window.source_tabs.setCurrentWidget(window.matches)
+    assert window._date_utc(window.start_edit) == previous_start
+    assert "자료 입력 방식" in window.recompute_notice.text()
+
+
+def test_manual_refresh_only_checks_earth_reference(window, tmp_path, qtbot):
+    earth = EarthData(tmp_path / "iers", tmp_path / "leaps", {"iers": {"sha256": "new"}})
+
+    class EarthOnlyService:
+        def get_earth_data(self, *, force, cancel, status):
+            assert force
+            return earth
+
+        def resolve_satellite(self, *args, **kwargs):
+            pytest.fail("manual refresh called CelesTrak")
+
+    window.service = EarthOnlyService()
+    window.source_tabs.setCurrentWidget(window.manual_input)
+    assert window.snapshot.source_kind == "manual"
+    window.refresh_data()
+    qtbot.waitUntil(lambda: window._thread is None, timeout=5000)
+    assert window.current_earth_data is earth
+    assert "직접 입력 유지" in window.task_status.text()
+
+
+def test_manual_acceleration_axes_and_default_window_follow_epoch(window):
+    manual = window.manual_input
+    epoch = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    manual.epoch_edit.setDateTime(QDateTime.fromSecsSinceEpoch(int(epoch.timestamp()), QTimeZone.utc()))
+    assert manual.accel_start.dateTime().toPython().replace(tzinfo=timezone.utc) == epoch
+    assert manual.accel_end.dateTime().toPython().replace(tzinfo=timezone.utc) == epoch + timedelta(hours=1)
+    manual.accel_check.setChecked(True)
+    manual.accel_frame.setCurrentIndex(1)
+    assert [label.text() for label in manual.accel_labels] == ["R · 방사", "T · 궤도 접선", "N · 궤도 법선"]
+    assert "T=N×R" in manual.accel_frame.toolTip()
+    assert manual.element_edits["raan_deg"].maximum() < 360
+    assert manual.build_input().acceleration.frame == "RTN"

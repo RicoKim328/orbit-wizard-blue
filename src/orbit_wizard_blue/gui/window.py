@@ -17,11 +17,12 @@ from PySide6.QtWidgets import (
 
 from orbit_wizard_blue.data import DataService
 from orbit_wizard_blue.local_data import LocalDataService
-from orbit_wizard_blue.models import DataSnapshot, EarthData, OrbitRequest, OrbitResult
+from orbit_wizard_blue.models import CancelledError, DataSnapshot, EarthData, OrbitRequest, OrbitResult, ValidationError
 from orbit_wizard_blue.user_store import FavoriteEntry, RecentEntry, UserStore
 
 from .orbit_view import OrbitView
 from .ground_track_view import GroundTrackView
+from .manual_input import ManualInputWidget
 from .tables import OrbitTableModel, configure_table_columns
 from .workers import TaskWorker
 
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
         self._play_base = 0.0
         self._play_started = 0.0
         self._playing = False
+        self._catalog_start: datetime | None = None
         self._build_ui()
         self._load_user_lists()
         self._timer = QTimer(self)
@@ -85,7 +87,9 @@ class MainWindow(QMainWindow):
 
         source_box = QGroupBox("위성 자료")
         source = QVBoxLayout(source_box)
-        search_row = QHBoxLayout()
+        self.search_widget = QWidget()
+        search_row = QHBoxLayout(self.search_widget)
+        search_row.setContentsMargins(0, 0, 0, 0)
         self.query = QLineEdit()
         self.query.setPlaceholderText("위성 이름 또는 NORAD 번호")
         self.query.returnPressed.connect(self.search)
@@ -93,7 +97,7 @@ class MainWindow(QMainWindow):
         self.search_button.clicked.connect(self.search)
         search_row.addWidget(self.query, 1)
         search_row.addWidget(self.search_button)
-        source.addLayout(search_row)
+        source.addWidget(self.search_widget)
         self.import_button = QPushButton("로컬 GP JSON/TLE 파일 열기…")
         self.import_button.clicked.connect(self.import_file)
         source.addWidget(self.import_button)
@@ -127,6 +131,10 @@ class MainWindow(QMainWindow):
         self.remove_favorite_button.clicked.connect(self.remove_selected_favorite)
         favorite_layout.addWidget(self.remove_favorite_button)
         self.source_tabs.addTab(favorite_page, "즐겨찾기")
+        self.manual_input = ManualInputWidget()
+        self.manual_input.changed.connect(self._manual_changed)
+        self.source_tabs.addTab(self.manual_input, "직접 입력")
+        self.source_tabs.currentChanged.connect(self._source_tab_changed)
         source.addWidget(self.source_tabs)
         self.favorite_button = QPushButton("선택 위성 즐겨찾기 추가")
         self.favorite_button.clicked.connect(self.toggle_favorite)
@@ -212,7 +220,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.ground_track_view, "지상 궤적")
         self.tables: list[QTableView] = []
         self.models: list[OrbitTableModel] = []
-        for frame in ("TEME", "ITRS", "측지"):
+        for frame in ("TEME", "ITRS", "GCRS", "측지"):
             model = OrbitTableModel(frame, self)
             table = QTableView()
             table.setModel(model)
@@ -250,6 +258,47 @@ class MainWindow(QMainWindow):
         self.result_summary.setWordWrap(True)
         self.result_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         right_layout.addWidget(self.result_summary)
+
+    def _manual_active(self) -> bool:
+        return self.source_tabs.currentWidget() is self.manual_input
+
+    def _source_tab_changed(self) -> None:
+        manual = self._manual_active()
+        self.search_widget.setVisible(not manual)
+        self.import_button.setVisible(not manual)
+        self.favorite_button.setVisible(not manual)
+        if manual:
+            self._catalog_start = self._date_utc(self.start_edit)
+            self.start_edit.setReadOnly(True)
+            self.start_edit.setEnabled(False)
+            self._manual_changed()
+        elif self._catalog_start is not None:
+            self.start_edit.setReadOnly(False)
+            self.start_edit.setEnabled(True)
+            self.start_edit.setDateTime(QDateTime.fromSecsSinceEpoch(
+                int(self._catalog_start.timestamp()), QTimeZone.utc()))
+            self._catalog_start = None
+            current = self.matches.currentItem()
+            self.snapshot = current.data(Qt.UserRole) if current is not None else None
+            self._show_source_status()
+            self._update_controls()
+            self._update_result_mismatch()
+
+    def _manual_changed(self) -> None:
+        if not self._manual_active():
+            return
+        from orbit_wizard_blue.manual import manual_snapshot
+
+        epoch = self.manual_input.epoch_utc()
+        self.start_edit.setDateTime(QDateTime.fromSecsSinceEpoch(int(epoch.timestamp()), QTimeZone.utc()))
+        try:
+            manual = self.manual_input.build_input()
+            self.snapshot = manual_snapshot(manual)
+        except (ValidationError, ValueError, TypeError):
+            self.snapshot = None
+        self._show_source_status()
+        self._update_controls()
+        self._update_result_mismatch()
 
     def _start_task(self, label: str, task, on_success) -> None:
         if self._thread is not None:
@@ -477,7 +526,15 @@ class MainWindow(QMainWindow):
     def _show_source_status(self) -> None:
         snapshot = self.snapshot
         if snapshot is None:
-            self.source_status.setText("위성을 선택해 주세요.")
+            self.source_status.setText("직접 입력값을 확인해 주세요." if self._manual_active()
+                                       else "위성을 선택해 주세요.")
+            return
+        if snapshot.source_kind == "manual":
+            gravity = snapshot.source_metadata.get("gravity_model", self.manual_input.gravity_combo.currentData())
+            self.source_status.setText(
+                f"직접 입력 · GCRS · {_name(snapshot)}"
+                f"\n요소시각 UTC: {self._utc_label(self.manual_input.epoch_utc())}"
+                f"\n중력: {gravity} · 온라인 위성 요소 사용 안 함")
             return
         age = "오래된 캐시" if snapshot.stale else "확인됨"
         self.source_status.setText(
@@ -499,9 +556,11 @@ class MainWindow(QMainWindow):
             return
         satellite = result.satellite
         request = result.request
-        source_kind = {"online": "온라인", "local": "로컬 파일", "file": "로컬 파일", "local_file": "로컬 파일"}.get(
+        source_kind = {"online": "온라인", "local": "로컬 파일", "manual": "직접 입력",
+                       "file": "로컬 파일", "local_file": "로컬 파일"}.get(
             satellite.source_kind, satellite.source_kind)
-        summary = (f"계산 결과: {_name(satellite)} · NORAD {_id(satellite)} · "
+        identity = f" · NORAD {_id(satellite)}" if satellite.source_kind != "manual" else ""
+        summary = (f"계산 결과: {_name(satellite)}{identity} · "
                    f"{source_kind}/{satellite.source_format}\n"
                    f"{self._utc_label(request.start_utc)} ~ {self._utc_label(request.end_utc)}"
                    f" · {request.step_seconds}초 간격\n출처: {satellite.source_url}")
@@ -516,7 +575,14 @@ class MainWindow(QMainWindow):
         reasons = []
         current = self.snapshot
         used = result.satellite
-        if current is None or _id(current) != _id(used):
+        if self._manual_active() != (used.source_kind == "manual"):
+            reasons.append("자료 입력 방식")
+        elif current is None:
+            reasons.append("현재 입력값")
+        elif used.source_kind == "manual":
+            if current.sha256 != used.sha256:
+                reasons.append("직접 입력 궤도/힘 모델")
+        elif _id(current) != _id(used):
             reasons.append("선택 위성")
         elif (current.sha256 != used.sha256 or current.source_url != used.source_url
               or current.source_kind != used.source_kind or current.source_format != used.source_format):
@@ -542,8 +608,9 @@ class MainWindow(QMainWindow):
     def _snapshot_status(label: str, snapshot: DataSnapshot | None) -> str:
         if snapshot is None:
             return f"{label}: 없음"
-        kind = "로컬 파일" if snapshot.source_kind == "local" else "온라인 GP"
-        return (f"{label}: {_name(snapshot)} · NORAD {_id(snapshot)}\n"
+        kind = {"local": "로컬 파일", "manual": "직접 입력"}.get(snapshot.source_kind, "온라인 GP")
+        identity = f" · NORAD {_id(snapshot)}" if snapshot.source_kind != "manual" else ""
+        return (f"{label}: {_name(snapshot)}{identity}\n"
                 f"  자료 형식: {kind} / {snapshot.source_format}\n"
                 f"  요소시각 UTC: {snapshot.payload.get('EPOCH', '알 수 없음')}\n"
                 f"  수신 UTC: {snapshot.fetched_at or '알 수 없음'}\n"
@@ -598,9 +665,9 @@ class MainWindow(QMainWindow):
             self.task_status.setText("업데이트할 위성을 선택해 주세요.")
             return
         def task(progress, cancel):
-            if snapshot.source_kind == "local":
+            if snapshot.source_kind in ("local", "manual"):
                 fresh = snapshot
-                progress(5, "로컬 파일은 그대로 두고 지구 참조 자료를 확인합니다…")
+                progress(5, "위성 입력은 그대로 두고 지구 참조 자료를 확인합니다…")
             else:
                 progress(5, "위성 자료 확인 중…")
                 fresh = self.service.resolve_satellite(
@@ -617,12 +684,13 @@ class MainWindow(QMainWindow):
         self.snapshot = snapshot
         self.current_earth_data = earth
         current = self.matches.currentItem()
-        if current is not None:
+        if current is not None and snapshot.source_kind != "manual":
             current.setData(Qt.UserRole, snapshot)
             current.setText(_match_label(snapshot))
         self._show_source_status()
         provider_wait = "next GP check" in snapshot.warning
-        self.task_status.setText(("로컬 위성 자료 유지 · 지구 참조 자료 확인 완료" if snapshot.source_kind == "local"
+        self.task_status.setText(("직접 입력 유지 · 지구 참조 자료 확인 완료" if snapshot.source_kind == "manual"
+                                  else "로컬 위성 자료 유지 · 지구 참조 자료 확인 완료" if snapshot.source_kind == "local"
                                   else "제공자 갱신 대기 중" if provider_wait else "자료 업데이트 완료")
                                  + (f" · {snapshot.warning}" if snapshot.warning else "")
                                  + (f" · {earth.warning}" if earth.warning else ""))
@@ -633,9 +701,20 @@ class MainWindow(QMainWindow):
 
     def calculate(self) -> None:
         snapshot = self.snapshot
-        if snapshot is None:
+        if snapshot is None and not self._manual_active():
             self.task_status.setText("위성을 선택해 주세요.")
             return
+        manual = None
+        if self._manual_active():
+            from orbit_wizard_blue.manual import manual_snapshot, validate_manual_input
+
+            try:
+                manual = self.manual_input.build_input()
+                validate_manual_input(manual)
+                snapshot = manual_snapshot(manual)
+            except (ValidationError, ValueError, TypeError) as exc:
+                QMessageBox.warning(self, "직접 입력 오류", str(exc))
+                return
         request = OrbitRequest(self._date_utc(self.start_edit), self._date_utc(self.end_edit), self.step_edit.value())
         if request.end_utc <= request.start_utc:
             QMessageBox.warning(self, "입력 오류", "종료 시각은 시작 시각보다 늦어야 합니다.")
@@ -644,6 +723,20 @@ class MainWindow(QMainWindow):
         def task(progress, cancel):
             from orbit_wizard_blue.orbit import compute_ephemeris
 
+            if manual is not None:
+                from orbit_wizard_blue.numerical import compute_manual_ephemeris
+
+                progress(1, "직접 입력 궤도 계산 준비 중…")
+                try:
+                    earth = self.service.get_earth_data(
+                        cancel=cancel, status=lambda message: progress(2, message))
+                except CancelledError:
+                    raise
+                except Exception:
+                    earth = None
+                    progress(2, "지구 참조 자료 없음 · GCRS 계산을 계속합니다…")
+                return compute_manual_ephemeris(
+                    manual, request, earth, progress=progress, cancel=cancel), earth
             if snapshot.source_kind == "local":
                 current_snapshot = snapshot
                 progress(1, "로컬 위성 자료 사용 중…")
@@ -655,7 +748,8 @@ class MainWindow(QMainWindow):
             earth = self.service.get_earth_data(cancel=cancel, status=lambda message: progress(2, message))
             return compute_ephemeris(current_snapshot, request, earth, progress=progress, cancel=cancel), earth
 
-        self._start_task("궤도 계산 중…", task, self._calculation_done)
+        self._start_task("직접 입력 궤도 계산 중…" if manual is not None else "궤도 계산 중…",
+                         task, self._calculation_done)
 
     def _calculation_done(self, value: OrbitResult | tuple[OrbitResult, EarthData]) -> None:
         if isinstance(value, tuple):
@@ -665,7 +759,7 @@ class MainWindow(QMainWindow):
         self.result = result
         self.snapshot = result.satellite
         current = self.matches.currentItem()
-        if current is not None:
+        if current is not None and result.satellite.source_kind != "manual":
             current.setData(Qt.UserRole, self.snapshot)
             current.setText(_match_label(self.snapshot))
         self._show_source_status()
@@ -675,6 +769,10 @@ class MainWindow(QMainWindow):
                                 for t in result.times_utc]
         for model in self.models:
             model.set_result(result)
+        itrs_available = result.itrs_position_km is not None
+        self.frame_combo.model().item(1).setEnabled(itrs_available)
+        if not itrs_available and self.frame_combo.currentData() == "ITRS":
+            self.frame_combo.setCurrentIndex(0)
         self.orbit_view.set_result(result)
         self.ground_track_view.set_result(result)
         self.slider.setRange(0, max(0, len(result.times_utc) - 1))
@@ -689,7 +787,8 @@ class MainWindow(QMainWindow):
         result = self.result
         if result is None:
             return
-        proposed = f"orbit-{_id(result.satellite)}.csv"
+        proposed = (f"orbit-{_id(result.satellite)}.csv" if result.satellite.source_kind != "manual"
+                    else "orbit-manual.csv")
         chosen, _ = QFileDialog.getSaveFileName(self, "결과 CSV 저장", proposed, "CSV 파일 (*.csv)")
         if not chosen:
             return
@@ -776,6 +875,8 @@ class MainWindow(QMainWindow):
 
     def _update_controls(self) -> None:
         busy = self._thread is not None
+        manual = self._manual_active()
+        self.source_tabs.setEnabled(not busy)
         self.search_button.setEnabled(not busy)
         self.import_button.setEnabled(not busy)
         self.matches.setEnabled(not busy)
@@ -785,9 +886,10 @@ class MainWindow(QMainWindow):
         self.clear_recent_button.setEnabled(not busy and self.recent_list.count() > 0)
         self.remove_favorite_button.setEnabled(not busy and self.favorite_list.currentItem() is not None)
         self.query.setEnabled(not busy)
+        self.manual_input.setEnabled(not busy)
         self.refresh_button.setEnabled(not busy and self.snapshot is not None)
-        self.favorite_button.setEnabled(not busy and self.snapshot is not None)
-        self.calculate_button.setEnabled(not busy and self.snapshot is not None)
+        self.favorite_button.setEnabled(not busy and not manual and self.snapshot is not None)
+        self.calculate_button.setEnabled(not busy and (self.snapshot is not None or manual))
         self.cancel_button.setEnabled(busy)
         self.export_button.setEnabled(not busy and self.result is not None)
         self.play_button.setEnabled(self.result is not None and len(self.result.times_utc) > 1)

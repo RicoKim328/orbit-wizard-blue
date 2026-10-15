@@ -19,6 +19,14 @@ from typing import Any
 class _OfflineService:
     """Fail closed if the validation GUI unexpectedly requests provider data."""
 
+    def __init__(self, earth=None):
+        self.earth = earth
+
+    def get_earth_data(self, *, cancel=None, status=None, force=False):
+        if cancel is not None and cancel():
+            raise RuntimeError("GUI validation was cancelled")
+        return self.earth
+
     def __getattr__(self, name: str) -> Any:
         raise RuntimeError(f"Unexpected data service call during offline GUI validation: {name}")
 
@@ -154,7 +162,7 @@ def run_gui_check(output_dir: Path) -> int:
             source, earth, result = _fixture()
             app = QApplication.instance() or QApplication([])
             report["environment"]["qt_platform_actual"] = app.platformName()
-            window_kwargs: dict[str, Any] = {"service": _OfflineService()}
+            window_kwargs: dict[str, Any] = {"service": _OfflineService(earth)}
             if "user_data_dir" in inspect.signature(MainWindow).parameters:
                 window_kwargs["user_data_dir"] = Path(scratch)
             window = MainWindow(**window_kwargs)
@@ -243,11 +251,59 @@ def run_gui_check(output_dir: Path) -> int:
                     and y_range[0] <= -89.5 and y_range[1] >= 89.5
                 )
                 capture("ground-track")
+                QTimer.singleShot(100, guarded(stage_manual))
+
+            def stage_manual() -> None:
+                manual = window.manual_input
+                window.source_tabs.setCurrentWidget(manual)
+                manual.name_edit.setText("FROZEN MANUAL VALIDATION")
+                manual.epoch_edit.setDateTime(QDateTime.fromSecsSinceEpoch(
+                    int(result.request.start_utc.timestamp()), QTimeZone.utc()))
+                manual.element_edits["raan_deg"].setValue(75)
+                manual.element_edits["argp_deg"].setValue(120)
+                manual.element_edits["true_anomaly_deg"].setValue(240)
+                window.end_edit.setDateTime(QDateTime.fromSecsSinceEpoch(
+                    int((result.request.start_utc + timedelta(minutes=2)).timestamp()), QTimeZone.utc()))
+                window.calculate()
+                QTimer.singleShot(50, guarded(wait_for_manual))
+
+            def wait_for_manual() -> None:
+                if window._thread is not None:
+                    QTimer.singleShot(50, guarded(wait_for_manual))
+                    return
+                manual_result = window.result
+                checks = report["checks"]
+                checks["manual_source_shown"] = (
+                    manual_result is not None and manual_result.satellite.source_kind == "manual"
+                    and window.source_tabs.currentWidget() is window.manual_input
+                )
+                if checks["manual_source_shown"]:
+                    checks["manual_native_gcrs"] = manual_result.native_frame == "GCRS"
+                    checks["manual_sample_count"] = len(manual_result.times_utc) == 3
+                    checks["manual_gcrs_state"] = (
+                        manual_result.gcrs_position_km is not None
+                        and manual_result.gcrs_velocity_km_s is not None
+                        and window.models[2].data(window.models[2].index(0, 1)) not in (None, "—")
+                    )
+                    checks["manual_views_synchronized"] = (
+                        window.orbit_view.index == window.slider.value()
+                        and window.ground_track_view.index == window.slider.value()
+                        and all(table.selectionModel().currentIndex().row() == window.slider.value()
+                                for table in window.tables)
+                    )
+                    checks["manual_3d_context"] = bool(window.orbit_view.available and window.orbit_view.view.isValid())
+                    checks["manual_ground_track"] = window.ground_track_view._track_available
+                window.tabs.setCurrentWidget(window.tables[2])
+                QTimer.singleShot(250, guarded(stage_manual_capture))
+
+            def stage_manual_capture() -> None:
+                capture("manual")
+                checks = report["checks"]
                 failures = [name for name, value in checks.items() if isinstance(value, bool) and not value]
                 finish("GUI checks failed: " + ", ".join(failures) if failures else None)
 
             QTimer.singleShot(300, guarded(stage_gcrs))
-            QTimer.singleShot(15_000, guarded(lambda: finish("GUI validation timed out after 15 seconds")))
+            QTimer.singleShot(30_000, guarded(lambda: finish("GUI validation timed out after 30 seconds")))
             app.exec()
             if not finished:
                 report["error"] = "Qt event loop exited before GUI validation completed"

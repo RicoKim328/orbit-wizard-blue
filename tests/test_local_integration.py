@@ -66,7 +66,7 @@ def test_local_import_compute_export_favorite_reopen_without_network(tmp_path, s
     assert first.gcrs_position_km is not None
     first_csv, first_json = export_ephemeris(first, tmp_path / "first.csv")
     metadata = json.loads(first_json.read_text(encoding="utf-8"))
-    assert metadata["schema_version"] == 2
+    assert metadata["schema_version"] == 3
     assert metadata["source"]["kind"] == "local"
     assert metadata["source"]["format"] == source_format
     assert metadata["source"]["metadata"]["file_sha256"] == source.source_metadata["file_sha256"]

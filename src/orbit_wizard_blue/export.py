@@ -22,6 +22,7 @@ _HEADER = (
     "itrs_vx_km_s", "itrs_vy_km_s", "itrs_vz_km_s",
     "geodetic_lat_deg", "geodetic_lon_deg", "geodetic_height_km",
     "gcrs_x_km", "gcrs_y_km", "gcrs_z_km",
+    "gcrs_vx_km_s", "gcrs_vy_km_s", "gcrs_vz_km_s",
 )
 
 
@@ -39,14 +40,16 @@ def _write_csv(path: Path, result: OrbitResult) -> None:
             writer.writerow((i, instant, satellite_name, norad_id,
                              *_vector(result.teme_position_km, i), *_vector(result.teme_velocity_km_s, i),
                              *_vector(result.itrs_position_km, i), *_vector(result.itrs_velocity_km_s, i),
-                             *_vector(result.geodetic_deg_km, i), *_vector(result.gcrs_position_km, i)))
+                             *_vector(result.geodetic_deg_km, i), *_vector(result.gcrs_position_km, i),
+                             *_vector(result.gcrs_velocity_km_s, i)))
 
 
 def _metadata(result: OrbitResult) -> dict[str, Any]:
     satellite = result.satellite
     request = result.request
     return {
-        "schema_version": 2,
+        "schema_version": 3,
+        "native_frame": result.native_frame,
         "source": {
             "url": satellite.source_url,
             "kind": satellite.source_kind,
@@ -68,8 +71,10 @@ def _metadata(result: OrbitResult) -> dict[str, Any]:
         "first_sample_utc": result.times_utc[0] if result.times_utc else None,
         "last_sample_utc": result.times_utc[-1] if result.times_utc else None,
         "columns": list(_HEADER),
-        "frames_available": {"TEME": True, "ITRS": result.itrs_position_km is not None,
-                             "GCRS": result.gcrs_position_km is not None},
+        "frames_available": {"TEME": result.teme_position_km is not None,
+                             "ITRS": result.itrs_position_km is not None,
+                             "GCRS": result.gcrs_position_km is not None,
+                             "GCRS_velocity": result.gcrs_velocity_km_s is not None},
         "warnings": list(result.warnings),
         "provenance": thaw_json(result.provenance),
     }
@@ -102,7 +107,7 @@ def export_ephemeris(result: OrbitResult, path: Path) -> tuple[Path, Path]:
         staged.append(json_temp)
         _write_csv(csv_temp, result)
         with json_temp.open("w", encoding="utf-8") as stream:
-            json.dump(_metadata(result), stream, ensure_ascii=False, indent=2, sort_keys=True)
+            json.dump(_metadata(result), stream, ensure_ascii=False, allow_nan=False, indent=2, sort_keys=True)
             stream.write("\n")
         for destination in (csv_path, json_path):
             if destination.exists():

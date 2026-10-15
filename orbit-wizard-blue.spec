@@ -7,7 +7,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy
 
 datas = (collect_data_files("astropy") + collect_data_files("astropy_iers_data")
          + collect_data_files("pyqtgraph") + collect_data_files("orbit_wizard_blue"))
-for distribution in ("orbit-wizard-blue", "sgp4", "numpy", "astropy", "pyerfa"):
+for distribution in ("orbit-wizard-blue", "sgp4", "numpy", "scipy", "astropy", "pyerfa"):
     datas += copy_metadata(distribution)
 hiddenimports = collect_submodules("pyqtgraph.opengl") + collect_submodules(
     "OpenGL", filter=lambda name: not name.startswith(("OpenGL.GLUT", "OpenGL.Tk", "OpenGL.osmesa")))

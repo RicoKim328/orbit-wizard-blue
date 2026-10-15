@@ -163,6 +163,32 @@ def _coordinate_chunk(position: np.ndarray, velocity: np.ndarray, time: Time) ->
     return itrs_p, itrs_v, gcrs_p, geo, rotation
 
 
+def _coordinate_chunk_from_gcrs(
+    position: np.ndarray, velocity: np.ndarray, time: Time,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Convert a numerical GCRS state, including rotating-frame velocity."""
+    representation = CartesianRepresentation(
+        position.T * u.km,
+        differentials=CartesianDifferential(velocity.T * u.km / u.s),
+    )
+    gcrs = GCRS(representation, obstime=time)
+    teme = gcrs.transform_to(TEME(obstime=time))
+    itrs = gcrs.transform_to(ITRS(obstime=time))
+    teme_p = teme.cartesian.xyz.to_value(u.km).T
+    teme_v = teme.cartesian.differentials["s"].d_xyz.to_value(u.km / u.s).T
+    itrs_p = itrs.cartesian.xyz.to_value(u.km).T
+    itrs_v = itrs.cartesian.differentials["s"].d_xyz.to_value(u.km / u.s).T
+    geodetic = itrs.earth_location.geodetic
+    geo = np.column_stack((geodetic.lat.to_value(u.deg), geodetic.lon.to_value(u.deg), geodetic.height.to_value(u.km)))
+    rotation = np.empty((len(time), 3, 3), dtype=np.float64)
+    for axis in range(3):
+        basis = np.zeros((3, len(time)), dtype=np.float64)
+        basis[axis] = 1.0
+        rotated = ITRS(CartesianRepresentation(basis * u.km), obstime=time).transform_to(GCRS(obstime=time))
+        rotation[:, :, axis] = rotated.cartesian.xyz.to_value(u.km).T
+    return teme_p, teme_v, itrs_p, itrs_v, geo, rotation
+
+
 def compute_ephemeris(
     snapshot: DataSnapshot,
     request: OrbitRequest,

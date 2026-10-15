@@ -61,7 +61,9 @@ def smoke_test() -> int:
     from astropy.utils import iers
 
     from orbit_wizard_blue.export import export_ephemeris
+    from orbit_wizard_blue.manual import ConstantAcceleration, KeplerianElements, ManualOrbitInput
     from orbit_wizard_blue.models import DataSnapshot, EarthData, OrbitRequest
+    from orbit_wizard_blue.numerical import compute_manual_ephemeris
     from orbit_wizard_blue.orbit import _satrec, compute_ephemeris
 
     app = QApplication.instance() or QApplication([])
@@ -95,6 +97,22 @@ def smoke_test() -> int:
         csv_path, metadata_path = export_ephemeris(result, Path(temp_dir) / "smoke.csv")
         if not csv_path.read_bytes().startswith(b"\xef\xbb\xbf") or not metadata_path.exists():
             raise RuntimeError("CSV or metadata export failed")
+        manual = ManualOrbitInput(
+            name="MANUAL SMOKE", epoch_utc=epoch,
+            elements=KeplerianElements(7000.0, 0.001, 51.6, 75.0, 120.0, 240.0),
+            acceleration=ConstantAcceleration((0.0, 0.001, 0.0), "RTN",
+                                              epoch + timedelta(seconds=20),
+                                              epoch + timedelta(seconds=80)),
+        )
+        manual_result = compute_manual_ephemeris(manual, result.request, earth)
+        if (manual_result.native_frame != "GCRS" or manual_result.gcrs_velocity_km_s is None
+                or manual_result.itrs_position_km is None or len(manual_result.times_utc) != 3):
+            raise RuntimeError(f"Manual numerical propagation failed: {manual_result.warnings}")
+        if manual_result.provenance.get("libraries", {}).get("scipy") in (None, "unknown"):
+            raise RuntimeError("SciPy package metadata missing from bundle")
+        _, manual_metadata = export_ephemeris(manual_result, Path(temp_dir) / "manual.csv")
+        if json.loads(manual_metadata.read_text(encoding="utf-8")).get("schema_version") != 3:
+            raise RuntimeError("Manual export metadata schema mismatch")
     print(f"Smoke OK: Qt {QtCore.__version__}, PyQtGraph {pyqtgraph.__version__}, "
           f"PyOpenGL {OpenGL.__version__}, Astropy {astropy.__version__}")
     return 0

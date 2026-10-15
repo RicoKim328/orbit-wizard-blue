@@ -52,6 +52,8 @@ class OrbitTableModel(QAbstractTableModel):
             array = self.result.geodetic_deg_km
         elif self.frame == "TEME":
             array = self.result.teme_position_km if col < 4 else self.result.teme_velocity_km_s
+        elif self.frame == "GCRS":
+            array = self.result.gcrs_position_km if col < 4 else getattr(self.result, "gcrs_velocity_km_s", None)
         else:
             array = self.result.itrs_position_km if col < 4 else self.result.itrs_velocity_km_s
         if array is None:

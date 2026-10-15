@@ -97,8 +97,8 @@ class OrbitResult:
     satellite: DataSnapshot
     request: OrbitRequest
     times_utc: tuple[str, ...]
-    teme_position_km: NDArray[np.float64]
-    teme_velocity_km_s: NDArray[np.float64]
+    teme_position_km: NDArray[np.float64] | None
+    teme_velocity_km_s: NDArray[np.float64] | None
     itrs_position_km: NDArray[np.float64] | None
     itrs_velocity_km_s: NDArray[np.float64] | None
     gcrs_position_km: NDArray[np.float64] | None
@@ -106,16 +106,25 @@ class OrbitResult:
     earth_rotation: NDArray[np.float64] | None
     warnings: tuple[str, ...] = ()
     provenance: Mapping[str, Any] = field(default_factory=dict)
+    gcrs_velocity_km_s: NDArray[np.float64] | None = None
+    native_frame: str = "TEME"
 
     def __post_init__(self) -> None:
         n = len(self.times_utc)
         if not isinstance(self.satellite, DataSnapshot):
             raise ValidationError("Satellite must be a DataSnapshot")
+        if self.native_frame not in ("TEME", "GCRS"):
+            raise ValidationError("Native frame must be TEME or GCRS")
+        if self.native_frame == "TEME" and (self.teme_position_km is None or self.teme_velocity_km_s is None):
+            raise ValidationError("TEME native results require position and velocity")
+        if self.native_frame == "GCRS" and (self.gcrs_position_km is None or self.gcrs_velocity_km_s is None):
+            raise ValidationError("GCRS native results require position and velocity")
         object.__setattr__(self, "times_utc", tuple(self.times_utc))
         object.__setattr__(self, "teme_position_km", _readonly_array(self.teme_position_km, (n, 3)))
         object.__setattr__(self, "teme_velocity_km_s", _readonly_array(self.teme_velocity_km_s, (n, 3)))
         for name in ("itrs_position_km", "itrs_velocity_km_s", "gcrs_position_km", "geodetic_deg_km"):
             object.__setattr__(self, name, _readonly_array(getattr(self, name), (n, 3)))
+        object.__setattr__(self, "gcrs_velocity_km_s", _readonly_array(self.gcrs_velocity_km_s, (n, 3)))
         object.__setattr__(self, "earth_rotation", _readonly_array(self.earth_rotation, (n, 3, 3)))
         object.__setattr__(self, "warnings", tuple(self.warnings))
         object.__setattr__(self, "provenance", freeze_json(self.provenance))
