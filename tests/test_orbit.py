@@ -11,7 +11,7 @@ from astropy import units as u
 from astropy.time import Time
 from astropy.utils import iers
 
-from orbit_wizard_blue.models import CancelledError, DataSnapshot, EarthData, OrbitRequest, ValidationError
+from orbit_wizard_blue.models import CancelledError, DataSnapshot, EarthData, OrbitRequest, ValidationError, thaw_json
 from orbit_wizard_blue.orbit import _check_eop_coverage, _coordinate_chunk, compute_ephemeris
 
 
@@ -38,8 +38,28 @@ def test_vallado_reference_vector_and_immutable_snapshot():
         result.teme_position_km[0, 0] = 0
     with pytest.raises(ValueError):
         result.teme_position_km.setflags(write=True)
-    source.payload["MEAN_MOTION"] = 0
+    with pytest.raises(TypeError):
+        source.payload["MEAN_MOTION"] = 0
     assert result.satellite.payload["MEAN_MOTION"] == FIXTURE["elements"]["MEAN_MOTION"]
+
+
+def test_nested_metadata_is_frozen_and_can_be_thawed():
+    payload = dict(FIXTURE["elements"])
+    payload["nested"] = [{"number": 1}]
+    source_metadata = {"origin": {"tags": ["validated"]}}
+    satellite = DataSnapshot(payload, "local", "fetch", "check", "hash", source_metadata=source_metadata)
+    payload["nested"][0]["number"] = 2
+    source_metadata["origin"]["tags"].append("later")
+    assert satellite.payload["nested"][0]["number"] == 1
+    assert satellite.source_metadata["origin"]["tags"] == ("validated",)
+    with pytest.raises(TypeError):
+        satellite.payload["nested"][0]["number"] = 3
+    with pytest.raises(TypeError):
+        satellite.source_metadata["origin"]["tags"] = ()
+    result = compute_ephemeris(satellite, OrbitRequest(EPOCH, EPOCH), None)
+    with pytest.raises(TypeError):
+        result.provenance["libraries"]["sgp4"] = "changed"
+    assert thaw_json(satellite.source_metadata) == {"origin": {"tags": ["validated"]}}
 
 
 def test_utc_grid_includes_only_exact_steps_and_limit():
@@ -97,6 +117,24 @@ def test_iers_coverage_is_explicit_and_teme_survives_unusable_earth_data(tmp_pat
     result = compute_ephemeris(snapshot(), OrbitRequest(EPOCH, EPOCH), missing)
     assert result.itrs_position_km is None
     assert any("unavailable" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
+def test_nonfinite_coordinate_output_keeps_only_valid_teme(monkeypatch, invalid_value):
+    from orbit_wizard_blue import orbit as module
+
+    def broken_coordinate_chunk(position, velocity, time):
+        vectors = [np.zeros((len(time), 3)) for _ in range(4)]
+        vectors[0][0, 0] = invalid_value
+        return (*vectors, np.broadcast_to(np.eye(3), (len(time), 3, 3)))
+
+    monkeypatch.setattr(module, "_coordinate_chunk", broken_coordinate_chunk)
+    result = compute_ephemeris(snapshot(), OrbitRequest(EPOCH, EPOCH), earth())
+    assert np.isfinite(result.teme_position_km).all()
+    assert result.itrs_position_km is None
+    assert result.gcrs_position_km is None
+    assert result.earth_rotation is None
+    assert any("non-finite" in warning for warning in result.warnings)
 
 
 @pytest.mark.parametrize("mean_motion, altitude_band_km", [

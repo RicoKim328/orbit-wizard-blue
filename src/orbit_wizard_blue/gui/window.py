@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import QDateTime, QThread, QTimeZone, QTimer, Qt
+from PySide6.QtCore import QDateTime, QTimeZone, QTimer, Qt, Slot
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDateTimeEdit, QDialog, QFileDialog, QFormLayout,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
@@ -16,10 +16,13 @@ from PySide6.QtWidgets import (
 )
 
 from orbit_wizard_blue.data import DataService
+from orbit_wizard_blue.local_data import LocalDataService
 from orbit_wizard_blue.models import DataSnapshot, EarthData, OrbitRequest, OrbitResult
+from orbit_wizard_blue.user_store import FavoriteEntry, RecentEntry, UserStore
 
 from .orbit_view import OrbitView
-from .tables import OrbitTableModel
+from .ground_track_view import GroundTrackView
+from .tables import OrbitTableModel, configure_table_columns
 from .workers import TaskWorker
 
 
@@ -31,23 +34,35 @@ def _id(snapshot: DataSnapshot) -> str:
     return str(snapshot.payload.get("NORAD_CAT_ID", ""))
 
 
+def _match_label(snapshot: DataSnapshot) -> str:
+    epoch = str(snapshot.payload.get("EPOCH") or "시각 알 수 없음")
+    kind = "로컬" if snapshot.source_kind == "local" else "온라인"
+    return f"{_name(snapshot)} · NORAD {_id(snapshot)} · {epoch} · {kind}"
+
+
 class MainWindow(QMainWindow):
-    def __init__(self, service: DataService | None = None):
+    def __init__(self, service: DataService | None = None, *,
+                 local_service: LocalDataService | None = None,
+                 store: UserStore | None = None,
+                 user_data_dir: Path | None = None):
         super().__init__()
         self.setWindowTitle("orbit-wizard-blue — 위성 궤도 분석")
         self.resize(1360, 860)
         self.service = service if service is not None else DataService()
+        self.local_service = local_service if local_service is not None else LocalDataService(user_data_dir)
+        self.store = store if store is not None else UserStore(user_data_dir)
         self.snapshot: DataSnapshot | None = None
         self.result: OrbitResult | None = None
         self.current_earth_data: EarthData | None = None
-        self._worker: TaskWorker | None = None
-        self._thread: QThread | None = None
+        self._thread: TaskWorker | None = None
+        self._on_success = None
         self._pending_close = False
         self._sample_seconds: list[float] = []
         self._play_base = 0.0
         self._play_started = 0.0
         self._playing = False
         self._build_ui()
+        self._load_user_lists()
         self._timer = QTimer(self)
         self._timer.setInterval(33)
         self._timer.timeout.connect(self._play_tick)
@@ -79,10 +94,43 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self.query, 1)
         search_row.addWidget(self.search_button)
         source.addLayout(search_row)
+        self.import_button = QPushButton("로컬 GP JSON/TLE 파일 열기…")
+        self.import_button.clicked.connect(self.import_file)
+        source.addWidget(self.import_button)
+        self.source_tabs = QTabWidget()
         self.matches = QListWidget()
         self.matches.setMinimumHeight(150)
         self.matches.currentItemChanged.connect(self._select_satellite)
-        source.addWidget(self.matches)
+        self.source_tabs.addTab(self.matches, "검색·파일")
+        recent_page = QWidget()
+        recent_layout = QVBoxLayout(recent_page)
+        self.recent_list = QListWidget()
+        self.recent_list.itemActivated.connect(self._open_recent)
+        self.recent_list.currentItemChanged.connect(self._update_controls)
+        recent_layout.addWidget(self.recent_list)
+        recent_actions = QHBoxLayout()
+        self.remove_recent_button = QPushButton("선택 삭제")
+        self.remove_recent_button.clicked.connect(self.remove_recent)
+        self.clear_recent_button = QPushButton("전체 지우기")
+        self.clear_recent_button.clicked.connect(self.clear_recent)
+        recent_actions.addWidget(self.remove_recent_button)
+        recent_actions.addWidget(self.clear_recent_button)
+        recent_layout.addLayout(recent_actions)
+        self.source_tabs.addTab(recent_page, "최근")
+        favorite_page = QWidget()
+        favorite_layout = QVBoxLayout(favorite_page)
+        self.favorite_list = QListWidget()
+        self.favorite_list.itemActivated.connect(self._open_favorite)
+        self.favorite_list.currentItemChanged.connect(self._update_controls)
+        favorite_layout.addWidget(self.favorite_list)
+        self.remove_favorite_button = QPushButton("선택 즐겨찾기 삭제")
+        self.remove_favorite_button.clicked.connect(self.remove_selected_favorite)
+        favorite_layout.addWidget(self.remove_favorite_button)
+        self.source_tabs.addTab(favorite_page, "즐겨찾기")
+        source.addWidget(self.source_tabs)
+        self.favorite_button = QPushButton("선택 위성 즐겨찾기 추가")
+        self.favorite_button.clicked.connect(self.toggle_favorite)
+        source.addWidget(self.favorite_button)
         self.refresh_button = QPushButton("자료 업데이트")
         self.refresh_button.clicked.connect(self.refresh_data)
         source.addWidget(self.refresh_button)
@@ -110,6 +158,9 @@ class MainWindow(QMainWindow):
         self.step_edit.setRange(1, 86400)
         self.step_edit.setValue(60)
         self.step_edit.setSuffix(" 초")
+        self.start_edit.dateTimeChanged.connect(self._update_result_mismatch)
+        self.end_edit.dateTimeChanged.connect(self._update_result_mismatch)
+        self.step_edit.valueChanged.connect(self._update_result_mismatch)
         form.addRow("시작", self.start_edit)
         form.addRow("종료", self.end_edit)
         form.addRow("간격", self.step_edit)
@@ -157,6 +208,8 @@ class MainWindow(QMainWindow):
         self.reset_camera_button.clicked.connect(self.orbit_view.reset_camera)
         self.fit_camera_button.clicked.connect(self.orbit_view.fit_camera)
         self.tabs.addTab(view_page, "3D 궤도")
+        self.ground_track_view = GroundTrackView()
+        self.tabs.addTab(self.ground_track_view, "지상 궤적")
         self.tables: list[QTableView] = []
         self.models: list[OrbitTableModel] = []
         for frame in ("TEME", "ITRS", "측지"):
@@ -167,7 +220,7 @@ class MainWindow(QMainWindow):
             table.setSelectionMode(QAbstractItemView.SingleSelection)
             table.setSortingEnabled(False)
             table.verticalHeader().setDefaultSectionSize(23)
-            table.horizontalHeader().setStretchLastSection(True)
+            configure_table_columns(table, frame)
             table.selectionModel().currentRowChanged.connect(self._table_row_changed)
             self.tabs.addTab(table, frame)
             self.tables.append(table)
@@ -193,6 +246,10 @@ class MainWindow(QMainWindow):
         right_layout.addLayout(playback)
         self.sample_label = QLabel("계산 결과 없음")
         right_layout.addWidget(self.sample_label)
+        self.result_summary = QLabel("계산 결과가 없습니다.")
+        self.result_summary.setWordWrap(True)
+        self.result_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        right_layout.addWidget(self.result_summary)
 
     def _start_task(self, label: str, task, on_success) -> None:
         if self._thread is not None:
@@ -200,40 +257,52 @@ class MainWindow(QMainWindow):
         self._pause()
         self.task_status.setText(label)
         self.progress.setValue(0)
-        thread = QThread(self)
-        worker = TaskWorker(task)
-        worker.moveToThread(thread)
-        self._thread, self._worker = thread, worker
-        thread.started.connect(worker.run)
-        worker.progress.connect(self._task_progress)
-        worker.succeeded.connect(on_success)
-        worker.failed.connect(self._task_failed)
-        worker.cancelled.connect(lambda: self.task_status.setText("작업이 취소되었습니다."))
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(self._thread_finished)
+        thread = TaskWorker(task, self)
+        self._thread = thread
+        self._on_success = on_success
+        thread.progress.connect(self._task_progress, Qt.QueuedConnection)
+        thread.succeeded.connect(self._task_succeeded, Qt.QueuedConnection)
+        thread.failed.connect(self._task_failed, Qt.QueuedConnection)
+        thread.cancelled.connect(self._task_cancelled, Qt.QueuedConnection)
+        thread.finished.connect(self._thread_finished, Qt.QueuedConnection)
         thread.finished.connect(thread.deleteLater)
         thread.start()
         self._update_controls()
+        self._update_result_mismatch()
 
+    @Slot()
     def _thread_finished(self) -> None:
+        thread = self._thread
+        if thread is not None:
+            thread.wait()
         self._thread = None
-        self._worker = None
+        self._on_success = None
         self._update_controls()
         if self._pending_close:
             QTimer.singleShot(0, self.close)
 
+    @Slot(object)
+    def _task_succeeded(self, value) -> None:
+        if self._on_success is not None:
+            self._on_success(value)
+
+    @Slot(int, str)
     def _task_progress(self, percent: int, message: str) -> None:
         self.progress.setValue(max(0, min(100, percent)))
         self.task_status.setText(message)
 
+    @Slot(str)
     def _task_failed(self, message: str) -> None:
         self.task_status.setText(f"오류: {message}")
         QMessageBox.warning(self, "작업 오류", message)
 
+    @Slot()
+    def _task_cancelled(self) -> None:
+        self.task_status.setText("작업이 취소되었습니다.")
+
     def cancel_task(self) -> None:
-        if self._worker is not None:
-            self._worker.request_cancel()
+        if self._thread is not None:
+            self._thread.request_cancel()
             self.task_status.setText("취소 중…")
 
     def search(self) -> None:
@@ -241,14 +310,153 @@ class MainWindow(QMainWindow):
         if not query:
             self.task_status.setText("검색어를 입력해 주세요.")
             return
-        self._start_task("위성 검색 중…", lambda progress, cancel: self.service.search_satellites(query, cancel=cancel),
-                         self._show_matches)
+        def task(progress, cancel):
+            return self.service.search_satellites(
+                query, cancel=cancel, status=lambda message: progress(10, message))
+
+        self._start_task("위성 검색 중…", task, lambda snapshots: self._search_done(query, snapshots))
+
+    def _search_done(self, query: str, snapshots: list[DataSnapshot]) -> None:
+        self._show_matches(snapshots)
+        self.source_tabs.setCurrentWidget(self.matches)
+        self.store.record_recent("online_query", query, label=f"온라인 검색: {query}")
+        self._load_user_lists()
+
+    def import_file(self) -> None:
+        chosen, _ = QFileDialog.getOpenFileName(
+            self, "로컬 위성 자료 열기", "", "위성 자료 (*.json *.tle *.txt);;모든 파일 (*)")
+        if not chosen:
+            return
+        path = Path(chosen)
+        self._start_task("로컬 파일 확인 중…", lambda progress, cancel: self.local_service.import_file(path),
+                         lambda snapshots: self._import_done(path.name, snapshots))
+
+    def _import_done(self, label: str, snapshots: list[DataSnapshot]) -> None:
+        self._show_matches(snapshots)
+        self.source_tabs.setCurrentWidget(self.matches)
+        if snapshots:
+            self.store.record_recent("local_import", label, label=f"로컬 파일: {label}",
+                                     file_sha256=str(snapshots[0].source_metadata["file_sha256"]))
+            self._load_user_lists()
+            self.task_status.setText(f"로컬 파일에서 위성 {len(snapshots)}개를 불러왔습니다.")
+
+    def _load_user_lists(self) -> None:
+        self.recent_list.clear()
+        for entry in self.store.list_recent(limit=20):
+            item = QListWidgetItem(f"{entry.label} · {entry.at_utc}")
+            item.setData(Qt.UserRole, entry)
+            self.recent_list.addItem(item)
+        self.favorite_list.clear()
+        for entry in self.store.list_favorites():
+            kind = "로컬" if entry.snapshot.source_kind == "local" else "온라인"
+            item = QListWidgetItem(f"{entry.label} · NORAD {_id(entry.snapshot)} · {kind}")
+            item.setData(Qt.UserRole, entry)
+            self.favorite_list.addItem(item)
+        self._update_favorite_button()
+        self._update_controls()
+
+    def _open_recent(self, item: QListWidgetItem) -> None:
+        entry: RecentEntry = item.data(Qt.UserRole)
+        if entry.kind == "online_query":
+            self.query.setText(entry.query)
+            self.search()
+            return
+        if entry.file_sha256 is None:
+            self.task_status.setText("최근 로컬 파일의 저장 정보가 없습니다.")
+            return
+        def task(progress, cancel):
+            if entry.record_index is None:
+                return self.local_service.load_import(entry.file_sha256)
+            return [self.local_service.load_record(entry.file_sha256, entry.record_index)]
+
+        self._start_task("저장된 로컬 파일 여는 중…", task,
+                         lambda snapshots: self._local_recent_done(entry, snapshots))
+
+    def _local_recent_done(self, entry: RecentEntry, snapshots: list[DataSnapshot]) -> None:
+        self._show_matches(snapshots)
+        self.source_tabs.setCurrentWidget(self.matches)
+        self.store.record_recent("local_import", entry.query, label=entry.label,
+                                 file_sha256=entry.file_sha256, record_index=entry.record_index)
+        self._load_user_lists()
+        self.task_status.setText(f"저장된 로컬 위성 {len(snapshots)}개를 열었습니다.")
+
+    def remove_recent(self) -> None:
+        item = self.recent_list.currentItem()
+        if item is None:
+            return
+        self.store.remove_recent(item.data(Qt.UserRole).key)
+        self._load_user_lists()
+
+    def clear_recent(self) -> None:
+        self.store.clear_recent()
+        self._load_user_lists()
+
+    def remove_selected_favorite(self) -> None:
+        item = self.favorite_list.currentItem()
+        if item is None:
+            return
+        self.store.remove_favorite(item.data(Qt.UserRole).key)
+        self._load_user_lists()
+
+    def _open_favorite(self, item: QListWidgetItem) -> None:
+        entry: FavoriteEntry = item.data(Qt.UserRole)
+        if entry.file_sha256 is not None and entry.record_index is not None:
+            self._start_task(
+                "저장된 로컬 위성 여는 중…",
+                lambda progress, cancel: self.local_service.load_record(entry.file_sha256, entry.record_index),
+                lambda snapshot: self._favorite_done(snapshot))
+        else:
+            def task(progress, cancel):
+                progress(5, "즐겨찾기 위성 자료 확인 중…")
+                return self.service.get_satellite(
+                    _id(entry.snapshot), cancel=cancel, status=lambda message: progress(10, message))
+
+            self._start_task("즐겨찾기 위성 자료 확인 중…", task, self._favorite_done)
+
+    def _favorite_done(self, snapshot: DataSnapshot) -> None:
+        self._show_matches([snapshot])
+        self.source_tabs.setCurrentWidget(self.matches)
+        self.task_status.setText("즐겨찾기 위성 자료를 확인했습니다. 계산 시 자료를 다시 확인합니다."
+                                 if snapshot.source_kind == "online" else "저장된 로컬 위성을 선택했습니다.")
+
+    def _favorite_key(self, snapshot: DataSnapshot) -> str | None:
+        if snapshot.source_kind == "online":
+            return f"online:{_id(snapshot)}"
+        if snapshot.source_kind == "local":
+            digest = snapshot.source_metadata.get("file_sha256")
+            index = snapshot.source_metadata.get("record_index")
+            if digest is not None and index is not None:
+                return f"local:{digest}:{index}"
+        return None
+
+    def _update_favorite_button(self) -> None:
+        key = self._favorite_key(self.snapshot) if self.snapshot else None
+        present = key is not None and any(
+            item.data(Qt.UserRole).key == key for item in
+            (self.favorite_list.item(index) for index in range(self.favorite_list.count())))
+        self.favorite_button.setText("선택 위성 즐겨찾기 해제" if present else "선택 위성 즐겨찾기 추가")
+
+    def toggle_favorite(self) -> None:
+        snapshot = self.snapshot
+        if snapshot is None:
+            return
+        key = self._favorite_key(snapshot)
+        if key is None:
+            self.task_status.setText("이 위성은 즐겨찾기에 저장할 수 없습니다.")
+            return
+        if any(entry.key == key for entry in self.store.list_favorites()):
+            self.store.remove_favorite(key)
+            self.task_status.setText("즐겨찾기를 해제했습니다.")
+        else:
+            self.store.add_favorite(snapshot)
+            self.task_status.setText("즐겨찾기에 저장했습니다.")
+        self._load_user_lists()
 
     def _show_matches(self, snapshots: list[DataSnapshot]) -> None:
         self.matches.clear()
         self.snapshot = None
         for snapshot in snapshots:
-            item = QListWidgetItem(f"{_name(snapshot)} · {_id(snapshot)}")
+            item = QListWidgetItem(_match_label(snapshot))
             item.setData(Qt.UserRole, snapshot)
             self.matches.addItem(item)
         self.task_status.setText(f"검색 결과 {len(snapshots)}개")
@@ -257,11 +465,14 @@ class MainWindow(QMainWindow):
         else:
             self.source_status.setText("검색 결과가 없습니다.")
         self._update_controls()
+        self._update_result_mismatch()
+        self._update_favorite_button()
 
     def _select_satellite(self, current: QListWidgetItem | None, _previous) -> None:
         self.snapshot = current.data(Qt.UserRole) if current is not None else None
         self._show_source_status()
         self._update_controls()
+        self._update_result_mismatch()
 
     def _show_source_status(self) -> None:
         snapshot = self.snapshot
@@ -270,17 +481,70 @@ class MainWindow(QMainWindow):
             return
         age = "오래된 캐시" if snapshot.stale else "확인됨"
         self.source_status.setText(
-            f"{age} · 요소시각 UTC: {snapshot.payload.get('EPOCH', '알 수 없음')}"
+            f"{'로컬 파일' if snapshot.source_kind == 'local' else '온라인 GP'} · {age}"
+            f" · 요소시각 UTC: {snapshot.payload.get('EPOCH', '알 수 없음')}"
             f"\n확인 UTC: {snapshot.checked_at}\n수신 UTC: {snapshot.fetched_at}"
             f"\n출처: {snapshot.source_url}"
             + (f"\n주의: {snapshot.warning}" if snapshot.warning else "")
         )
 
     @staticmethod
+    def _utc_label(value: datetime) -> str:
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    def _show_result_summary(self) -> None:
+        result = self.result
+        if result is None:
+            self.result_summary.setText("계산 결과가 없습니다.")
+            return
+        satellite = result.satellite
+        request = result.request
+        source_kind = {"online": "온라인", "local": "로컬 파일", "file": "로컬 파일", "local_file": "로컬 파일"}.get(
+            satellite.source_kind, satellite.source_kind)
+        summary = (f"계산 결과: {_name(satellite)} · NORAD {_id(satellite)} · "
+                   f"{source_kind}/{satellite.source_format}\n"
+                   f"{self._utc_label(request.start_utc)} ~ {self._utc_label(request.end_utc)}"
+                   f" · {request.step_seconds}초 간격\n출처: {satellite.source_url}")
+        self.result_summary.setText(summary)
+        self.result_summary.setToolTip(summary)
+
+    def _update_result_mismatch(self) -> None:
+        result = self.result
+        if result is None:
+            self.recompute_notice.setText("")
+            return
+        reasons = []
+        current = self.snapshot
+        used = result.satellite
+        if current is None or _id(current) != _id(used):
+            reasons.append("선택 위성")
+        elif (current.sha256 != used.sha256 or current.source_url != used.source_url
+              or current.source_kind != used.source_kind or current.source_format != used.source_format):
+            reasons.append("위성 자료")
+        request = result.request
+        if (self._date_utc(self.start_edit) != request.start_utc
+                or self._date_utc(self.end_edit) != request.end_utc
+                or self.step_edit.value() != request.step_seconds):
+            reasons.append("UTC 계산 구간/간격")
+        if self.current_earth_data is not None:
+            used_earth = result.provenance.get("earth_data", {})
+            if any(self.current_earth_data.provenance.get(key, {}).get("sha256")
+                   != used_earth.get(key, {}).get("sha256") for key in ("iers", "leap_seconds")):
+                reasons.append("IERS/윤초 자료")
+        if reasons:
+            self.recompute_notice.setText("현재 " + ", ".join(reasons)
+                                          + "가 표시된 계산 결과와 다릅니다. 이전 결과는 계속 보거나 CSV로 저장할 수 있습니다. "
+                                            "새 조건을 적용하려면 다시 계산하세요.")
+        else:
+            self.recompute_notice.setText("")
+
+    @staticmethod
     def _snapshot_status(label: str, snapshot: DataSnapshot | None) -> str:
         if snapshot is None:
             return f"{label}: 없음"
+        kind = "로컬 파일" if snapshot.source_kind == "local" else "온라인 GP"
         return (f"{label}: {_name(snapshot)} · NORAD {_id(snapshot)}\n"
+                f"  자료 형식: {kind} / {snapshot.source_format}\n"
                 f"  요소시각 UTC: {snapshot.payload.get('EPOCH', '알 수 없음')}\n"
                 f"  수신 UTC: {snapshot.fetched_at or '알 수 없음'}\n"
                 f"  마지막 확인 UTC: {snapshot.checked_at or '알 수 없음'}\n"
@@ -315,9 +579,9 @@ class MainWindow(QMainWindow):
         current_earth = self.current_earth_data.provenance if self.current_earth_data else {}
         result_earth = self.result.provenance.get("earth_data", {}) if self.result else {}
         details.setPlainText("\n\n".join((
-            self._snapshot_status("현재 선택 GP 자료", self.snapshot),
+            self._snapshot_status("현재 선택 위성 자료", self.snapshot),
             self._earth_status("현재 지구 참조 자료", current_earth),
-            self._snapshot_status("표시된 계산 결과의 GP 자료", self.result.satellite if self.result else None),
+            self._snapshot_status("표시된 계산 결과의 위성 자료", self.result.satellite if self.result else None),
             self._earth_status("표시된 계산 결과의 지구 참조 자료", result_earth),
         )) + (f"\n\n현재 참조 자료 주의: {self.current_earth_data.warning}"
               if self.current_earth_data and self.current_earth_data.warning else ""))
@@ -334,10 +598,16 @@ class MainWindow(QMainWindow):
             self.task_status.setText("업데이트할 위성을 선택해 주세요.")
             return
         def task(progress, cancel):
-            progress(5, "위성 자료 확인 중…")
-            fresh = self.service.resolve_satellite(snapshot, force=True, cancel=cancel)
+            if snapshot.source_kind == "local":
+                fresh = snapshot
+                progress(5, "로컬 파일은 그대로 두고 지구 참조 자료를 확인합니다…")
+            else:
+                progress(5, "위성 자료 확인 중…")
+                fresh = self.service.resolve_satellite(
+                    snapshot, force=True, cancel=cancel, status=lambda message: progress(10, message))
             progress(50, "지구 회전 자료 확인 중…")
-            earth = self.service.get_earth_data(force=True, cancel=cancel)
+            earth = self.service.get_earth_data(
+                force=True, cancel=cancel, status=lambda message: progress(60, message))
             return fresh, earth
 
         self._start_task("자료 업데이트 중…", task, self._refresh_done)
@@ -349,20 +619,14 @@ class MainWindow(QMainWindow):
         current = self.matches.currentItem()
         if current is not None:
             current.setData(Qt.UserRole, snapshot)
-            current.setText(f"{_name(snapshot)} · {_id(snapshot)}")
+            current.setText(_match_label(snapshot))
         self._show_source_status()
         provider_wait = "next GP check" in snapshot.warning
-        self.task_status.setText(("제공자 갱신 대기 중" if provider_wait else "자료 업데이트 완료")
+        self.task_status.setText(("로컬 위성 자료 유지 · 지구 참조 자료 확인 완료" if snapshot.source_kind == "local"
+                                  else "제공자 갱신 대기 중" if provider_wait else "자료 업데이트 완료")
                                  + (f" · {snapshot.warning}" if snapshot.warning else "")
                                  + (f" · {earth.warning}" if earth.warning else ""))
-        if self.result is not None:
-            old_earth = self.result.provenance.get("earth_data", {})
-            earth_changed = any(
-                earth.provenance.get(key, {}).get("sha256") != old_earth.get(key, {}).get("sha256")
-                for key in ("iers", "leap_seconds")
-            )
-            if snapshot.sha256 != self.result.satellite.sha256 or earth_changed:
-                self.recompute_notice.setText("자료가 업데이트되었습니다. 표시된 계산 결과는 이전 자료로 계산되었습니다. 새 결과를 보려면 다시 계산하세요.")
+        self._update_result_mismatch()
 
     def _date_utc(self, edit: QDateTimeEdit) -> datetime:
         return edit.dateTime().toPython().replace(tzinfo=timezone.utc)
@@ -380,10 +644,15 @@ class MainWindow(QMainWindow):
         def task(progress, cancel):
             from orbit_wizard_blue.orbit import compute_ephemeris
 
-            progress(1, "선택 위성 자료 확인 중…")
-            current_snapshot = self.service.resolve_satellite(snapshot, cancel=cancel)
+            if snapshot.source_kind == "local":
+                current_snapshot = snapshot
+                progress(1, "로컬 위성 자료 사용 중…")
+            else:
+                progress(1, "선택 위성 자료 확인 중…")
+                current_snapshot = self.service.resolve_satellite(
+                    snapshot, cancel=cancel, status=lambda message: progress(1, message))
             progress(2, "지구 회전 자료 확인 중…")
-            earth = self.service.get_earth_data(cancel=cancel)
+            earth = self.service.get_earth_data(cancel=cancel, status=lambda message: progress(2, message))
             return compute_ephemeris(current_snapshot, request, earth, progress=progress, cancel=cancel), earth
 
         self._start_task("궤도 계산 중…", task, self._calculation_done)
@@ -398,16 +667,19 @@ class MainWindow(QMainWindow):
         current = self.matches.currentItem()
         if current is not None:
             current.setData(Qt.UserRole, self.snapshot)
+            current.setText(_match_label(self.snapshot))
         self._show_source_status()
+        self._show_result_summary()
         self._sample_seconds = [(datetime.fromisoformat(t.replace("Z", "+00:00"))
                                  - datetime.fromisoformat(result.times_utc[0].replace("Z", "+00:00"))).total_seconds()
                                 for t in result.times_utc]
         for model in self.models:
             model.set_result(result)
         self.orbit_view.set_result(result)
+        self.ground_track_view.set_result(result)
         self.slider.setRange(0, max(0, len(result.times_utc) - 1))
         self.set_sample_index(0)
-        self.recompute_notice.setText("")
+        self._update_result_mismatch()
         self.task_status.setText(f"계산 완료 · {len(result.times_utc):,}개 샘플"
                                  + (f" · 주의: {'; '.join(result.warnings)}" if result.warnings else ""))
         self.progress.setValue(100)
@@ -452,6 +724,7 @@ class MainWindow(QMainWindow):
             self.slider.setValue(index)
             self.slider.blockSignals(False)
         self.orbit_view.set_index(index)
+        self.ground_track_view.set_index(index)
         for table in self.tables:
             selection = table.selectionModel()
             if selection.currentIndex().row() != index:
@@ -504,9 +777,16 @@ class MainWindow(QMainWindow):
     def _update_controls(self) -> None:
         busy = self._thread is not None
         self.search_button.setEnabled(not busy)
+        self.import_button.setEnabled(not busy)
         self.matches.setEnabled(not busy)
+        self.recent_list.setEnabled(not busy)
+        self.favorite_list.setEnabled(not busy)
+        self.remove_recent_button.setEnabled(not busy and self.recent_list.currentItem() is not None)
+        self.clear_recent_button.setEnabled(not busy and self.recent_list.count() > 0)
+        self.remove_favorite_button.setEnabled(not busy and self.favorite_list.currentItem() is not None)
         self.query.setEnabled(not busy)
         self.refresh_button.setEnabled(not busy and self.snapshot is not None)
+        self.favorite_button.setEnabled(not busy and self.snapshot is not None)
         self.calculate_button.setEnabled(not busy and self.snapshot is not None)
         self.cancel_button.setEnabled(busy)
         self.export_button.setEnabled(not busy and self.result is not None)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version
@@ -20,7 +19,7 @@ from astropy.utils import iers
 from sgp4 import omm
 from sgp4.api import SGP4_ERRORS, Satrec
 
-from .models import CancelledError, DataSnapshot, EarthData, OrbitRequest, OrbitResult, ValidationError
+from .models import CancelledError, DataSnapshot, EarthData, OrbitRequest, OrbitResult, ValidationError, thaw_json
 
 
 _EARTH_LOCK = RLock()
@@ -208,7 +207,7 @@ def compute_ephemeris(
         pass
 
     itrs_p = itrs_v = gcrs_p = geo = rotation = None
-    earth_provenance = {} if earth_data is None else deepcopy(earth_data.provenance)
+    earth_provenance = {} if earth_data is None else thaw_json(earth_data.provenance)
     if earth_data is None:
         warnings.append("Earth orientation data are unavailable; ITRS, GCRS, geodetic, and 3D orientation are unavailable")
     else:
@@ -235,6 +234,13 @@ def compute_ephemeris(
                     time = Time(instants[left:right], scale="utc")
                     predicted = _check_eop_coverage(table, time) or predicted
                     values = _coordinate_chunk(position[left:right], velocity[left:right], time)
+                    for label, value, shape in zip(
+                        ("ITRS position", "ITRS velocity", "GCRS position", "geodetic coordinates", "Earth rotation"),
+                        values,
+                        ((right-left, 3),) * 4 + ((right-left, 3, 3),),
+                    ):
+                        if np.shape(value) != shape or not np.isfinite(value).all():
+                            raise ValueError(f"{label} contains invalid shape or non-finite values")
                     for array, value in zip((itrs_p, itrs_v, gcrs_p, geo, rotation), values):
                         array[left:right] = value
                     _notify(progress, 50 + min(49, round(49 * right / n)), "Coordinate conversion")

@@ -15,10 +15,13 @@ from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 from platformdirs import user_cache_dir
 
-from .models import CancelledError, DataSnapshot, EarthData, ValidationError
+from .models import CancelledError, DataSnapshot, EarthData, ValidationError, thaw_json
+from .cache_lock import process_lock, thread_lock
+from .validation import gp_items
 
 
 CACHE_SECONDS = 7200
@@ -37,7 +40,7 @@ def _iso(value: datetime) -> str:
 
 
 def _parse_time(value: str | None) -> datetime | None:
-    if not value:
+    if not isinstance(value, str) or not value:
         return None
     try:
         result = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -85,6 +88,14 @@ def _version_path(base: Path, meta: dict[str, Any]) -> Path:
     return base.with_name(f"{base.stem}.{digest}{base.suffix}")
 
 
+def _read_failure(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def _headers(response: Any) -> Any:
     return response.headers
 
@@ -107,42 +118,11 @@ def _retry_at(header: str | None, now: datetime) -> datetime | None:
 
 
 def _gp_items(raw: bytes) -> list[dict[str, Any]]:
-    try:
-        value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValidationError("CelesTrak returned malformed JSON") from exc
-    if not isinstance(value, list) or not value:
-        raise ValidationError("CelesTrak returned no satellite records")
-    required = {"NORAD_CAT_ID", "EPOCH", "MEAN_MOTION", "ECCENTRICITY", "INCLINATION", "RA_OF_ASC_NODE", "ARG_OF_PERICENTER", "MEAN_ANOMALY"}
-    for item in value:
-        if not isinstance(item, dict) or not required.issubset(item):
-            raise ValidationError("CelesTrak returned an incomplete GP record")
-        try:
-            datetime.fromisoformat(str(item["EPOCH"]).replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise ValidationError("CelesTrak returned invalid epoch") from exc
-        if not str(item["NORAD_CAT_ID"]).isdigit():
-            raise ValidationError("CelesTrak returned invalid catalog ID or epoch")
-        for field in required - {"NORAD_CAT_ID", "EPOCH"}:
-            try:
-                number = float(item[field])
-            except (TypeError, ValueError) as exc:
-                raise ValidationError(f"CelesTrak returned invalid {field}") from exc
-            if not (-1e100 < number < 1e100):
-                raise ValidationError(f"CelesTrak returned invalid {field}")
-    return value
+    return gp_items(raw)
 
 
 def _search_items(raw: bytes) -> list[dict[str, Any]]:
-    if raw.strip() == b"No GP data found":
-        return []
-    try:
-        value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValidationError("CelesTrak returned malformed JSON") from exc
-    if value == []:
-        return []
-    return _gp_items(raw)
+    return gp_items(raw, allow_empty=True)
 
 
 class DataService:
@@ -172,19 +152,25 @@ class DataService:
         iers.conf.iers_leap_second_auto_url = ""
         iers.conf.ietf_leap_second_auto_url = ""
 
-    def search_satellites(self, query: str, force: bool = False, cancel: Any = None) -> list[DataSnapshot]:
+    def search_satellites(
+        self, query: str, force: bool = False, cancel: Any = None,
+        status: Callable[[str], None] | None = None,
+    ) -> list[DataSnapshot]:
         query = query.strip()
         if not query:
             raise ValidationError("Enter a satellite name or NORAD ID")
         if query.isdigit():
-            return [self.get_satellite(query, force=force, cancel=cancel)]
+            return [self.get_satellite(query, force=force, cancel=cancel, status=status)]
         if len(query) > 200 or any(ord(character) < 32 for character in query):
             raise ValidationError("Invalid satellite name")
         url = f"{GP_URL}?{urlencode({'NAME': query, 'FORMAT': 'json'})}"
-        raw, meta, stale, warning, _ = self._fetch(url, "gp_search", force, _search_items, cancel)
+        raw, meta, stale, warning, _ = self._fetch(url, "gp_search", force, _search_items, cancel, status)
         return [self._snapshot(item, meta, stale, warning) for item in _search_items(raw)]
 
-    def get_satellite(self, norad_id: str, force: bool = False, cancel: Any = None) -> DataSnapshot:
+    def get_satellite(
+        self, norad_id: str, force: bool = False, cancel: Any = None,
+        status: Callable[[str], None] | None = None,
+    ) -> DataSnapshot:
         norad_id = str(norad_id).strip()
         if not re.fullmatch(r"[0-9]+", norad_id):
             raise ValidationError("NORAD ID must contain only digits")
@@ -194,7 +180,7 @@ class DataService:
             if len(items) != 1 or str(items[0]["NORAD_CAT_ID"]) != str(int(norad_id)):
                 raise ValidationError("CelesTrak returned a different NORAD ID")
 
-        raw, meta, stale, warning, _ = self._fetch(url, "gp", force, validate_number, cancel)
+        raw, meta, stale, warning, _ = self._fetch(url, "gp", force, validate_number, cancel, status)
         items = _gp_items(raw)
         matching = [item for item in items if str(item["NORAD_CAT_ID"]) == str(int(norad_id))]
         if len(matching) != 1:
@@ -202,13 +188,22 @@ class DataService:
         return self._snapshot(matching[0], meta, stale, warning)
 
     def resolve_satellite(
-        self, snapshot: DataSnapshot, force: bool = False, cancel: Any = None
+        self, snapshot: DataSnapshot, force: bool = False, cancel: Any = None,
+        status: Callable[[str], None] | None = None,
     ) -> DataSnapshot:
         """Recheck a selected record's original query before a calculation.
 
         Reusing its NAME query avoids a redundant CATNR download after search.
         The returned snapshot is independent of any earlier result.
         """
+        _check_cancel(cancel)
+        if snapshot.source_kind == "local":
+            if snapshot.source_format not in ("gp_json", "tle"):
+                raise ValidationError("Unsupported local satellite format")
+            gp_items(json.dumps([thaw_json(snapshot.payload)]).encode())
+            return snapshot
+        if snapshot.source_kind != "online":
+            raise ValidationError("Unsupported satellite source kind")
         source = urlsplit(snapshot.source_url)
         expected = urlsplit(GP_URL)
         if (source.scheme, source.netloc, source.path, source.fragment) != (
@@ -240,7 +235,7 @@ class DataService:
                 return items
         else:
             validator = _search_items
-        raw, meta, stale, warning, _ = self._fetch(snapshot.source_url, kind, force, validator, cancel)
+        raw, meta, stale, warning, _ = self._fetch(snapshot.source_url, kind, force, validator, cancel, status)
         matches = [item for item in validator(raw) if str(item["NORAD_CAT_ID"]) == norad_id]
         if len(matches) != 1:
             raise ValidationError("Selected satellite is unavailable in its source query")
@@ -258,7 +253,10 @@ class DataService:
             warning=warning,
         )
 
-    def get_earth_data(self, force: bool = False, cancel: Any = None) -> EarthData:
+    def get_earth_data(
+        self, force: bool = False, cancel: Any = None,
+        status: Callable[[str], None] | None = None,
+    ) -> EarthData:
         from astropy.utils import iers
 
         iers.conf.auto_download = False
@@ -273,7 +271,7 @@ class DataService:
             _check_cancel(cancel)
             try:
                 _, meta, stale, warning, path = self._fetch(
-                    url, name, force, lambda raw, check_path: validator(check_path), cancel
+                    url, name, force, lambda raw, check_path: validator(check_path), cancel, status
                 )
                 paths[name] = path
                 provenance[name] = {**meta, "kind": "downloaded", "stale": stale}
@@ -322,18 +320,33 @@ class DataService:
         force: bool,
         validator: Callable[..., Any],
         cancel: Any,
+        status: Callable[[str], None] | None = None,
     ) -> tuple[bytes, dict[str, Any], bool, str, Path]:
         content_path, meta_path, throttle_path, failure_path = self._paths(url, kind)
         key = str(content_path)
         before = self._read_cache(content_path, meta_path, url)
-        with _lock_for(key):
+        before_failure = _read_failure(failure_path)
+        def check_cancel() -> None:
+            _check_cancel(cancel)
+
+        def on_wait() -> None:
+            if status is not None:
+                label = {
+                    "gp": "위성 자료", "gp_search": "위성 검색",
+                    "iers": "지구 회전 자료", "leap_seconds": "윤초 자료",
+                }.get(kind, "외부 자료")
+                status(f"{label} 캐시 잠금을 기다리는 중…")
+
+        with thread_lock(_lock_for(key), check_cancel, on_wait), process_lock(
+            content_path.with_suffix(".lock"), check_cancel, on_wait
+        ):
             _check_cancel(cancel)
             cached = self._read_cache(content_path, meta_path, url)
             now = self._clock()
             if cached is not None:
                 raw, meta = cached
                 checked = _parse_time(meta["checked_at"])
-                if before is not None and before[1]["checked_at"] != meta["checked_at"]:
+                if before is None or before[1].get("check_id") != meta.get("check_id"):
                     return raw, meta, False, "", _version_path(content_path, meta)
                 # CelesTrak permits one GP download per two-hour update.
                 # A manual refresh cannot bypass the provider's own schedule.
@@ -357,13 +370,14 @@ class DataService:
                 if cached is not None:
                     return raw, meta, True, message, _version_path(content_path, meta)
                 raise RuntimeError(message)
+            failure = _read_failure(failure_path)
+            if failure and failure.get("failure_id") != before_failure.get("failure_id"):
+                message = f"Concurrent refresh failed: {failure.get('error', 'source unavailable')}"
+                if cached is not None:
+                    return raw, meta, True, message, _version_path(content_path, meta)
+                raise RuntimeError(message)
             if not force:
-                try:
-                    failure = json.loads(failure_path.read_text(encoding="utf-8"))
-                    attempted = _parse_time(failure.get("last_attempt_at"))
-                except (OSError, ValueError, TypeError):
-                    attempted = None
-                    failure = {}
+                attempted = _parse_time(failure.get("last_attempt_at"))
                 if attempted is not None and now < attempted + timedelta(seconds=CACHE_SECONDS):
                     message = (
                         f"Last refresh failed; retry after {_iso(attempted + timedelta(seconds=CACHE_SECONDS))}: "
@@ -386,7 +400,7 @@ class DataService:
                     if status == 304:
                         if cached is None:
                             raise ValidationError("Unexpected 304 without cached data")
-                        new_meta = {**meta, "checked_at": _iso(now)}
+                        new_meta = {**meta, "checked_at": _iso(now), "check_id": uuid4().hex}
                         _atomic_write(meta_path, json.dumps(new_meta).encode())
                         failure_path.unlink(missing_ok=True)
                         return raw, new_meta, False, "", _version_path(content_path, new_meta)
@@ -411,6 +425,7 @@ class DataService:
                         "sha256": sha256(fresh).hexdigest(),
                         "etag": _header(_headers(response), "ETag"),
                         "last_modified": _header(_headers(response), "Last-Modified"),
+                        "check_id": uuid4().hex,
                     }
                     _atomic_write(_version_path(content_path, fresh_meta), fresh)
                     _atomic_write(meta_path, json.dumps(fresh_meta).encode())
@@ -420,7 +435,7 @@ class DataService:
                     response.close()
             except HTTPError as exc:
                 if exc.code == 304 and cached is not None:
-                    new_meta = {**meta, "checked_at": _iso(now)}
+                    new_meta = {**meta, "checked_at": _iso(now), "check_id": uuid4().hex}
                     _atomic_write(meta_path, json.dumps(new_meta).encode())
                     failure_path.unlink(missing_ok=True)
                     return raw, new_meta, False, "", _version_path(content_path, new_meta)
@@ -434,6 +449,7 @@ class DataService:
                             "sha256": sha256(empty).hexdigest(),
                             "etag": None,
                             "last_modified": None,
+                            "check_id": uuid4().hex,
                         }
                         _atomic_write(_version_path(content_path, empty_meta), empty)
                         _atomic_write(meta_path, json.dumps(empty_meta).encode())
@@ -449,7 +465,9 @@ class DataService:
             except (OSError, URLError, ValueError, RuntimeError) as exc:
                 error = exc
             _check_cancel(cancel)
-            _atomic_write(failure_path, json.dumps({"last_attempt_at": _iso(now), "error": str(error)}).encode())
+            _atomic_write(failure_path, json.dumps({
+                "last_attempt_at": _iso(now), "failure_id": uuid4().hex, "error": str(error)
+            }).encode())
             if cached is not None:
                 return raw, meta, True, f"Refresh failed: {error}", _version_path(content_path, meta)
             raise RuntimeError(f"Data unavailable from {url}: {error}") from error

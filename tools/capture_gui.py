@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from PySide6.QtCore import QDateTime, QTimeZone, QTimer
 from PySide6.QtWidgets import QApplication, QHeaderView
@@ -25,6 +27,8 @@ from validate_orbit import build_fixture  # noqa: E402
 def example_inputs():
     """Use local validation GP elements and bundled Earth reference files."""
     snapshot, _, earth = build_fixture("meo")
+    snapshot = replace(snapshot, source_url="local-example://validation-meo", source_kind="local",
+                       source_metadata={"example_fixture": True})
     epoch = datetime.fromisoformat(str(snapshot.payload["EPOCH"])).replace(tzinfo=timezone.utc)
     request = OrbitRequest(epoch, epoch + timedelta(hours=12), 60)
     provenance = {}
@@ -55,7 +59,8 @@ def main() -> int:
     class OfflineService:
         pass
 
-    window = MainWindow(service=OfflineService())
+    user_state = TemporaryDirectory(prefix="orbit-wizard-capture-")
+    window = MainWindow(service=OfflineService(), user_data_dir=Path(user_state.name))
     window.query.setText("VALIDATION MEO")
     window._show_matches([snapshot])
     window.start_edit.setDateTime(QDateTime.fromSecsSinceEpoch(int(request.start_utc.timestamp()), QTimeZone.utc()))
@@ -99,12 +104,20 @@ def main() -> int:
             app.exit(3)
             return
         if save("itrs-window.png", window):
-            window.tabs.setCurrentIndex(1)
+            window.tabs.setCurrentWidget(window.ground_track_view)
+            QTimer.singleShot(500, capture_ground_track)
+
+    def capture_ground_track() -> None:
+        if window.ground_track_view.index != selected_index:
+            app.exit(5)
+            return
+        if save("ground-track.png", window):
+            window.tabs.setCurrentWidget(window.tables[0])
             QTimer.singleShot(500, capture_teme_table)
 
     def capture_teme_table() -> None:
         if save("teme-table.png", window):
-            window.tabs.setCurrentIndex(2)
+            window.tabs.setCurrentWidget(window.tables[1])
             QTimer.singleShot(500, capture_itrs_table)
 
     def capture_itrs_table() -> None:
@@ -115,12 +128,14 @@ def main() -> int:
 
     def capture_status() -> None:
         if save("data-status.png", window.data_status_dialog):
-            print(f"Saved gcrs-window.png, itrs-window.png, teme-table.png, itrs-table.png, "
+            print(f"Saved gcrs-window.png, itrs-window.png, ground-track.png, teme-table.png, itrs-table.png, "
                   f"data-status.png to {args.output_dir}")
             app.quit()
 
     QTimer.singleShot(2000, capture_gcrs)
-    return app.exec()
+    code = app.exec()
+    user_state.cleanup()
+    return code
 
 
 if __name__ == "__main__":

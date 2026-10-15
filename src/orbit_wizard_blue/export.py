@@ -11,7 +11,7 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any
 
-from .models import OrbitResult
+from .models import OrbitResult, thaw_json
 
 
 _HEADER = (
@@ -46,10 +46,13 @@ def _metadata(result: OrbitResult) -> dict[str, Any]:
     satellite = result.satellite
     request = result.request
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "source": {
             "url": satellite.source_url,
-            "payload": satellite.payload,
+            "kind": satellite.source_kind,
+            "format": satellite.source_format,
+            "metadata": thaw_json(satellite.source_metadata),
+            "payload": thaw_json(satellite.payload),
             "sha256": satellite.sha256,
             "fetched_at": satellite.fetched_at,
             "checked_at": satellite.checked_at,
@@ -68,7 +71,7 @@ def _metadata(result: OrbitResult) -> dict[str, Any]:
         "frames_available": {"TEME": True, "ITRS": result.itrs_position_km is not None,
                              "GCRS": result.gcrs_position_km is not None},
         "warnings": list(result.warnings),
-        "provenance": result.provenance,
+        "provenance": thaw_json(result.provenance),
     }
 
 

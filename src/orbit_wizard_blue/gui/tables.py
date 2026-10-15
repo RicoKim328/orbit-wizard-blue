@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableView
 
 from orbit_wizard_blue.models import OrbitResult
 
@@ -57,3 +58,22 @@ class OrbitTableModel(QAbstractTableModel):
             return "—"
         value = float(array[row, (col - 1) % 3])
         return f"{value:,.6f}" if math.isfinite(value) else "—"
+
+
+def configure_table_columns(table: QTableView, frame: str) -> None:
+    """Size from display formats without asking a large result model for rows."""
+    header = table.horizontalHeader()
+    header.setStretchLastSection(False)
+    header.setSectionResizeMode(QHeaderView.Interactive)
+    table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+    samples = ("2026-12-31T23:59:59.999999Z",)
+    if frame == "측지":
+        samples += ("-180.000000", "-180.000000", "-12,345.123456")
+    else:
+        samples += ("-123,456.123456",) * 3 + ("-123.123456",) * 3
+    metrics = table.fontMetrics()
+    model = table.model()
+    for column, sample in enumerate(samples):
+        title = str(model.headerData(column, Qt.Horizontal, Qt.DisplayRole))
+        table.setColumnWidth(column, max(metrics.horizontalAdvance(title),
+                                         metrics.horizontalAdvance(sample)) + 24)

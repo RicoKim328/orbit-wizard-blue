@@ -1,4 +1,4 @@
-"""Run network and propagation work outside the Qt GUI thread."""
+"""Run cancellable data and propagation tasks in a bounded Qt thread."""
 
 from __future__ import annotations
 
@@ -6,27 +6,24 @@ import logging
 from threading import Event
 from typing import Callable
 
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QThread, Signal
 
 from orbit_wizard_blue.models import CancelledError
 
 
-class TaskWorker(QObject):
+class TaskWorker(QThread):
     progress = Signal(int, str)
     succeeded = Signal(object)
     failed = Signal(str)
     cancelled = Signal()
-    finished = Signal()
-
-    def __init__(self, task: Callable[[Callable[[int, str], None], Callable[[], bool]], object]):
-        super().__init__()
+    def __init__(self, task: Callable[[Callable[[int, str], None], Callable[[], bool]], object], parent=None):
+        super().__init__(parent)
         self._task = task
         self._cancel = Event()
 
     def request_cancel(self) -> None:
         self._cancel.set()
 
-    @Slot()
     def run(self) -> None:
         try:
             result = self._task(self.progress.emit, self._cancel.is_set)
@@ -42,5 +39,3 @@ class TaskWorker(QObject):
                 self.cancelled.emit()
             else:
                 self.failed.emit(f"{type(exc).__name__}: {exc}")
-        finally:
-            self.finished.emit()

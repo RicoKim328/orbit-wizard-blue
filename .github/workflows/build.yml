@@ -41,6 +41,38 @@ jobs:
           if (-not (Test-Path $report)) { throw 'Smoke report was not written' }
           $json = Get-Content $report -Raw | ConvertFrom-Json
           if ($json.status -ne 'ok') { Get-Content $report; throw 'Smoke test failed' }
+      - name: Check frozen GUI and OpenGL at three display scales
+        shell: pwsh
+        run: |
+          $env:QT_OPENGL = 'software'
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'orbit-gui-check'
+          New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+          $failed = $false
+          foreach ($scale in @('1', '1.5', '2')) {
+            $env:QT_SCALE_FACTOR = $scale
+            $folder = Join-Path $outputRoot ('scale-' + $scale.Replace('.', '_'))
+            New-Item -ItemType Directory -Force -Path $folder | Out-Null
+            $process = Start-Process -FilePath '.\dist\orbit-wizard-blue\orbit-wizard-blue.exe' -ArgumentList @('--gui-check', '--gui-check-output-dir', "`"$folder`"") -Wait -PassThru
+            $reportPath = Join-Path $folder 'gui-check-report.json'
+            if ($process.ExitCode -ne 0 -or -not (Test-Path $reportPath)) {
+              Write-Error "GUI check failed at scale $scale (exit $($process.ExitCode))" -ErrorAction Continue
+              $failed = $true
+              continue
+            }
+            $report = Get-Content $reportPath -Raw | ConvertFrom-Json
+            if ($report.status -ne 'ok') {
+              Write-Error "GUI report failed at scale $scale" -ErrorAction Continue
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+      - name: Upload GUI check diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbit-wizard-blue-gui-check
+          path: ${{ runner.temp }}/orbit-gui-check/
+          if-no-files-found: warn
       - name: Include documentation and license notices
         shell: pwsh
         run: |

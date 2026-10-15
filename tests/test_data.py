@@ -12,6 +12,7 @@ import pytest
 
 from orbit_wizard_blue.data import CACHE_SECONDS, DataService
 from orbit_wizard_blue.models import CancelledError
+from orbit_wizard_blue.validation import gp_items
 
 
 GP = {
@@ -125,6 +126,68 @@ def test_invalid_refresh_retains_last_good_and_does_not_freshen(tmp_path):
     assert calls == 3
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("MEAN_MOTION", 0), ("MEAN_MOTION", float("inf")),
+        ("ECCENTRICITY", 1), ("ECCENTRICITY", -0.01),
+        ("INCLINATION", 181), ("INCLINATION", -1),
+        ("RA_OF_ASC_NODE", 360), ("ARG_OF_PERICENTER", -1),
+        ("MEAN_ANOMALY", 360), ("NORAD_CAT_ID", 0),
+        ("EPOCH", "2026-10-15"), ("EPOCH", "2026-10-15T00:00:00+09:00"),
+        ("CENTER_NAME", "MARS"), ("REF_FRAME", "GCRS"),
+        ("TIME_SYSTEM", "TAI"), ("MEAN_ELEMENT_THEORY", "NUMERICAL"),
+        ("BSTAR", float("nan")), ("BSTAR", True),
+        ("MEAN_MOTION_DOT", float("inf")), ("MEAN_MOTION_DDOT", "bad"),
+        ("EPHEMERIS_TYPE", True), ("EPHEMERIS_TYPE", -1),
+        ("ELEMENT_SET_NO", 1.5), ("REV_AT_EPOCH", -1),
+        ("CLASSIFICATION_TYPE", "UNKNOWN"), ("OBJECT_ID", 12345),
+    ],
+)
+def test_gp_validator_rejects_nonphysical_or_unsupported_records(field, value):
+    with pytest.raises(ValueError):
+        gp_items(json.dumps([{**GP, field: value}]).encode())
+
+
+def test_nonphysical_refresh_preserves_last_good_cache(tmp_path):
+    now = [datetime(2026, 10, 15, tzinfo=timezone.utc)]
+    calls = 0
+
+    def opener(request, timeout):
+        nonlocal calls
+        calls += 1
+        fields = GP if calls == 1 else {**GP, "ECCENTRICITY": 1.2}
+        return Response(json.dumps([fields]).encode())
+
+    service = DataService(tmp_path, opener=opener, clock=lambda: now[0])
+    good = service.get_satellite("12345")
+    now[0] += timedelta(hours=2)
+    stale = service.get_satellite("12345")
+    assert stale.stale
+    assert stale.sha256 == good.sha256
+    assert stale.checked_at == good.checked_at
+
+
+@pytest.mark.parametrize("bad_field", [{"BSTAR": float("nan")}, {"ELEMENT_SET_NO": True}, {"OBJECT_ID": 12345}])
+def test_invalid_optional_refresh_preserves_last_good_cache(tmp_path, bad_field):
+    now = [datetime(2026, 10, 15, tzinfo=timezone.utc)]
+    calls = 0
+
+    def opener(request, timeout):
+        nonlocal calls
+        calls += 1
+        fields = GP if calls == 1 else {**GP, **bad_field}
+        return Response(json.dumps([fields]).encode())
+
+    service = DataService(tmp_path, opener=opener, clock=lambda: now[0])
+    good = service.get_satellite("12345")
+    now[0] += timedelta(hours=2)
+    stale = service.get_satellite("12345")
+    assert stale.stale
+    assert stale.sha256 == good.sha256
+    assert stale.checked_at == good.checked_at
+
+
 def test_retry_after_blocks_manual_force_and_survives_restart(tmp_path):
     now = [datetime(2026, 10, 15, tzinfo=timezone.utc)]
     calls = 0
@@ -181,6 +244,38 @@ def test_concurrent_same_query_downloads_once(tmp_path):
         results = list(executor.map(service.get_satellite, ["12345"] * 8))
     assert calls == 1
     assert len({result.sha256 for result in results}) == 1
+
+
+def test_waiting_for_shared_cache_reports_status(tmp_path):
+    entered = Event()
+    release = Event()
+    announced = Event()
+    messages = []
+    calls = 0
+
+    def opener(request, timeout):
+        nonlocal calls
+        calls += 1
+        entered.set()
+        assert release.wait(3)
+        return Response(body())
+
+    def status(message):
+        messages.append(message)
+        announced.set()
+
+    service = DataService(tmp_path, opener=opener)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(service.get_satellite, "12345")
+        assert entered.wait(3)
+        second = executor.submit(service.get_satellite, "12345", status=status)
+        try:
+            assert announced.wait(3)
+            assert "캐시 잠금" in messages[0]
+        finally:
+            release.set()
+        assert first.result(timeout=3).sha256 == second.result(timeout=3).sha256
+    assert calls == 1
 
 
 def test_search_no_results_is_distinct_from_provider_error(tmp_path):

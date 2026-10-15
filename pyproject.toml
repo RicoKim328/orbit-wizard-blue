@@ -26,6 +26,9 @@ orbit-wizard-blue = "orbit_wizard_blue.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+orbit_wizard_blue = ["assets/*.geojson", "assets/*.txt"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

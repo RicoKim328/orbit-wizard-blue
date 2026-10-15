@@ -48,6 +48,7 @@ def _install_exception_hook(log_path: Path | None) -> None:
 def smoke_test() -> int:
     """Check frozen imports, local GP conversion, transforms, and export offline."""
     from datetime import datetime, timedelta, timezone
+    from importlib.resources import files
     from pathlib import Path
     from tempfile import TemporaryDirectory
 
@@ -68,6 +69,9 @@ def smoke_test() -> int:
         raise RuntimeError("Qt application initialization failed")
     if not hasattr(gl, "GLViewWidget"):
         raise RuntimeError("PyQtGraph OpenGL integration unavailable")
+    coastline = files("orbit_wizard_blue").joinpath("assets", "ne_110m_coastline.geojson")
+    if not coastline.is_file() or not json.loads(coastline.read_text(encoding="utf-8")).get("features"):
+        raise RuntimeError("Bundled Natural Earth coastline is missing or empty")
     epoch = datetime(2024, 1, 1, tzinfo=timezone.utc)
     payload = {
         "OBJECT_NAME": "SMOKE SAT", "NORAD_CAT_ID": 25544,
@@ -100,7 +104,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="위성 궤도 분석 데스크톱 앱")
     parser.add_argument("--smoke-test", action="store_true", help="GUI를 열지 않고 배포본 기본 검증")
     parser.add_argument("--smoke-output", type=str, help="기본 검증 결과 JSON 파일")
+    parser.add_argument("--gui-check", action="store_true", help="실제 GUI 화면과 동기화 검증")
+    parser.add_argument("--gui-check-output-dir", type=Path, help="GUI 검증 결과 폴더")
     args = parser.parse_args()
+    if args.gui_check:
+        output_dir = args.gui_check_output_dir or Path.cwd() / "gui-check-output"
+        try:
+            from orbit_wizard_blue.gui_validation import run_gui_check
+
+            return run_gui_check(output_dir)
+        except Exception:
+            message = traceback.format_exc()
+            print(message, file=sys.stderr)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "gui-check-report.json").write_text(
+                json.dumps({"status": "failed", "error": message}, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+            return 1
     if args.smoke_test:
         try:
             result = smoke_test()
@@ -110,8 +130,6 @@ def main() -> int:
             report = {"status": "failed", "traceback": traceback.format_exc()}
             print(report["traceback"], file=sys.stderr)
         if args.smoke_output:
-            from pathlib import Path
-
             Path(args.smoke_output).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return result
     log_path = configure_logging()
