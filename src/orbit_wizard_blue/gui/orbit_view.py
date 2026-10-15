@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from orbit_wizard_blue.models import OrbitResult
+from orbit_wizard_blue.gl_platform import configure_pyopengl
 
 
 EARTH_RADIUS_KM = 6378.137
@@ -28,6 +29,7 @@ class OrbitView(QWidget):
             self._layout.addWidget(QLabel("3D 표시가 비활성화되었습니다."))
             return
         try:
+            configure_pyopengl()
             import pyqtgraph.opengl as gl
             from pyqtgraph import Vector
 

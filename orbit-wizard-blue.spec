@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 """Portable one-directory Windows build."""
 
+import sys
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 datas = (collect_data_files("astropy") + collect_data_files("astropy_iers_data")
@@ -9,6 +11,8 @@ for distribution in ("orbit-wizard-blue", "sgp4", "numpy", "astropy", "pyerfa"):
     datas += copy_metadata(distribution)
 hiddenimports = collect_submodules("pyqtgraph.opengl") + collect_submodules(
     "OpenGL", filter=lambda name: not name.startswith(("OpenGL.GLUT", "OpenGL.Tk", "OpenGL.osmesa")))
+if sys.platform == "win32":
+    hiddenimports += ["orbit_wizard_blue.gl_software_win32"]
 
 a = Analysis(
     ["src/orbit_wizard_blue/__main__.py"],

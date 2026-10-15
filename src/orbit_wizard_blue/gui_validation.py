@@ -57,6 +57,43 @@ def _fixture():
     return source, earth, result
 
 
+def _opengl_diagnostics(orbit_view) -> dict[str, Any]:
+    """Describe the GL library and renderer bound to the displayed widget."""
+    from OpenGL import platform as gl_platform
+
+    details: dict[str, Any] = {
+        "pyopengl_platform_class": type(gl_platform.PLATFORM).__name__,
+        "pyopengl_gl_library": str(getattr(gl_platform.PLATFORM.GL, "_name", "")),
+    }
+    if not orbit_view.available or not orbit_view.view.isValid():
+        from PySide6.QtWidgets import QLabel
+
+        labels = [label.text() for label in orbit_view.findChildren(QLabel) if label.text()]
+        details["fallback_reason"] = labels[-1] if labels else "OpenGL widget is unavailable or invalid"
+        return details
+
+    from OpenGL import GL
+    from PySide6.QtGui import QOpenGLContext
+
+    view = orbit_view.view
+    try:
+        view.makeCurrent()
+        if QOpenGLContext.currentContext() is None:
+            details["fallback_reason"] = "makeCurrent did not activate an OpenGL context"
+            return details
+        for key, token in (("gl_vendor", GL.GL_VENDOR), ("gl_renderer", GL.GL_RENDERER),
+                           ("gl_version", GL.GL_VERSION)):
+            value = GL.glGetString(token)
+            details[key] = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value or "")
+        if not all(details[key] for key in ("gl_vendor", "gl_renderer", "gl_version")):
+            details["fallback_reason"] = "OpenGL context returned empty vendor, renderer, or version"
+    except Exception as exc:
+        details["fallback_reason"] = f"OpenGL diagnostics failed: {type(exc).__name__}: {exc}"
+    finally:
+        view.doneCurrent()
+    return details
+
+
 def run_gui_check(output_dir: Path) -> int:
     """Show and inspect the real GUI, save three images and a JSON report.
 
@@ -73,6 +110,8 @@ def run_gui_check(output_dir: Path) -> int:
             "system": platform.system(),
             "python": platform.python_version(),
             "qt_platform_requested": os.environ.get("QT_QPA_PLATFORM", ""),
+            "qt_opengl_requested": os.environ.get("QT_OPENGL", ""),
+            "pyopengl_platform_requested": os.environ.get("PYOPENGL_PLATFORM", ""),
             "ci": bool(os.environ.get("CI")),
             "physical_windows_11_gpu_verified": False,
         },
@@ -102,6 +141,11 @@ def run_gui_check(output_dir: Path) -> int:
         socket.socket.connect = blocked_connection
         socket.create_connection = blocked_connection
         try:
+            from .gl_platform import configure_pyopengl
+
+            configure_pyopengl()
+            report["environment"]["qt_opengl_requested"] = os.environ.get("QT_OPENGL", "")
+            report["environment"]["pyopengl_platform_requested"] = os.environ.get("PYOPENGL_PLATFORM", "")
             from PySide6.QtCore import QDateTime, QTimeZone, QTimer
             from PySide6.QtWidgets import QApplication
 
@@ -168,6 +212,10 @@ def run_gui_check(output_dir: Path) -> int:
                 )
                 checks["gcrs_selected"] = window.frame_combo.currentData() == "GCRS" and window.orbit_view.frame == "GCRS"
                 checks["opengl_context"] = bool(window.orbit_view.available and window.orbit_view.view.isValid())
+                report["opengl"] = _opengl_diagnostics(window.orbit_view)
+                checks["opengl_renderer_identified"] = all(
+                    report["opengl"].get(key) for key in ("gl_vendor", "gl_renderer", "gl_version")
+                )
                 capture("gcrs")
                 window.frame_combo.setCurrentIndex(1)
                 QTimer.singleShot(250, guarded(stage_itrs))

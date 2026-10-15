@@ -66,6 +66,13 @@ QT_QPA_PLATFORM=offscreen ORBIT_WIZARD_DISABLE_3D=1 .venv/bin/python -m pytest -
 
 Windows에서는 위 명령의 `.venv/bin/python`을 `.venv\Scripts\python.exe`로 바꿉니다. `ORBIT_WIZARD_DISABLE_3D=1`은 OpenGL 없이 GUI 테스트를 실행합니다. 실제 화면과 OpenGL 검사에는 `--gui-check --gui-check-output-dir 출력폴더`를 사용하며, 실행 환경의 그래픽 컨텍스트가 필요합니다.
 
+Windows의 기본 3D 경로는 시스템 OpenGL을 사용합니다. 그래픽 드라이버가 OpenGL 2.0 이상을 제공하지 않아 3D를 시작할 수 없으면 지도와 결과 표는 계속 사용할 수 있습니다. 동봉된 Qt 소프트웨어 OpenGL로 실행하려면 압축 해제한 폴더에서 다음을 실행하세요. 이 모드에서는 Qt와 PyOpenGL이 같은 `opengl32sw.dll`을 사용합니다.
+
+```powershell
+$env:QT_OPENGL = 'software'
+.\orbit-wizard-blue.exe
+```
+
 Windows x64 폴더 ZIP 빌드:
 
 ```powershell

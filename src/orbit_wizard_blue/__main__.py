@@ -107,6 +107,9 @@ def main() -> int:
     parser.add_argument("--gui-check", action="store_true", help="실제 GUI 화면과 동기화 검증")
     parser.add_argument("--gui-check-output-dir", type=Path, help="GUI 검증 결과 폴더")
     args = parser.parse_args()
+    from orbit_wizard_blue.gl_platform import configure_pyopengl
+
+    configure_pyopengl()
     if args.gui_check:
         output_dir = args.gui_check_output_dir or Path.cwd() / "gui-check-output"
         try:
