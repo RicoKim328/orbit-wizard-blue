@@ -42,7 +42,9 @@ def test_two_body_matches_analytic_circular_orbit_and_conserves_energy():
     np.testing.assert_allclose(result.gcrs_position_km, expected_position, atol=1e-4)
     np.testing.assert_allclose(result.gcrs_velocity_km_s, expected_velocity, atol=1e-7)
     energy = np.sum(result.gcrs_velocity_km_s**2, axis=1) / 2 - MU / np.linalg.norm(result.gcrs_position_km, axis=1)
-    assert np.ptp(energy) < 1e-8
+    # DOP853 uses 1e-10 relative tolerance; energy drift should remain below
+    # five times that scale across one orbit, allowing platform rounding noise.
+    assert np.ptp(energy) / abs(energy[0]) < 5e-10
     assert result.native_frame == "GCRS"
     assert result.teme_position_km is None
     assert result.itrs_position_km is None
