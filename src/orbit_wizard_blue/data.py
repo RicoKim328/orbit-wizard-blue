@@ -125,6 +125,18 @@ def _search_items(raw: bytes) -> list[dict[str, Any]]:
     return gp_items(raw, allow_empty=True)
 
 
+def _read_limited(response: Any, limit: int, cancel: Any) -> bytes:
+    content = bytearray()
+    while len(content) <= limit:
+        _check_cancel(cancel)
+        chunk = response.read(min(65_536, limit + 1 - len(content)))
+        _check_cancel(cancel)
+        if not chunk:
+            break
+        content.extend(chunk)
+    return bytes(content)
+
+
 class DataService:
     """Resolve all external inputs through one two-hour, persistent disk cache.
 
@@ -406,8 +418,9 @@ class DataService:
                         return raw, new_meta, False, "", _version_path(content_path, new_meta)
                     if status != 200:
                         raise RuntimeError(f"HTTP {status}")
-                    fresh = response.read()
-                    if not fresh or len(fresh) > (5_000_000 if kind.startswith("gp") else 20_000_000):
+                    limit = 5_000_000 if kind.startswith("gp") else 20_000_000
+                    fresh = _read_limited(response, limit, cancel)
+                    if not fresh or len(fresh) > limit:
                         raise ValidationError("Provider response is empty or too large")
                     _check_cancel(cancel)
                     if kind.startswith("gp"):
@@ -434,34 +447,37 @@ class DataService:
                 finally:
                     response.close()
             except HTTPError as exc:
-                if exc.code == 304 and cached is not None:
-                    new_meta = {**meta, "checked_at": _iso(now), "check_id": uuid4().hex}
-                    _atomic_write(meta_path, json.dumps(new_meta).encode())
-                    failure_path.unlink(missing_ok=True)
-                    return raw, new_meta, False, "", _version_path(content_path, new_meta)
-                if exc.code == 404 and kind == "gp_search":
-                    empty = exc.read()
-                    if empty.strip() == b"No GP data found":
-                        empty_meta = {
-                            "source_url": url,
-                            "fetched_at": _iso(now),
-                            "checked_at": _iso(now),
-                            "sha256": sha256(empty).hexdigest(),
-                            "etag": None,
-                            "last_modified": None,
-                            "check_id": uuid4().hex,
-                        }
-                        _atomic_write(_version_path(content_path, empty_meta), empty)
-                        _atomic_write(meta_path, json.dumps(empty_meta).encode())
+                try:
+                    if exc.code == 304 and cached is not None:
+                        new_meta = {**meta, "checked_at": _iso(now), "check_id": uuid4().hex}
+                        _atomic_write(meta_path, json.dumps(new_meta).encode())
                         failure_path.unlink(missing_ok=True)
-                        return empty, empty_meta, False, "", _version_path(content_path, empty_meta)
-                if exc.code in (403, 429, 503):
-                    retry = _retry_at(_header(exc.headers, "Retry-After"), now)
-                    if retry is None and exc.code == 403 and kind.startswith("gp"):
-                        retry = now + timedelta(seconds=CACHE_SECONDS)
-                    if retry is not None:
-                        _atomic_write(throttle_path, json.dumps({"retry_at": _iso(retry)}).encode())
-                error: Exception = exc
+                        return raw, new_meta, False, "", _version_path(content_path, new_meta)
+                    if exc.code == 404 and kind == "gp_search":
+                        empty = _read_limited(exc, 5_000_000, cancel)
+                        if len(empty) <= 5_000_000 and empty.strip() == b"No GP data found":
+                            empty_meta = {
+                                "source_url": url,
+                                "fetched_at": _iso(now),
+                                "checked_at": _iso(now),
+                                "sha256": sha256(empty).hexdigest(),
+                                "etag": None,
+                                "last_modified": None,
+                                "check_id": uuid4().hex,
+                            }
+                            _atomic_write(_version_path(content_path, empty_meta), empty)
+                            _atomic_write(meta_path, json.dumps(empty_meta).encode())
+                            failure_path.unlink(missing_ok=True)
+                            return empty, empty_meta, False, "", _version_path(content_path, empty_meta)
+                    if exc.code in (403, 429, 503):
+                        retry = _retry_at(_header(exc.headers, "Retry-After"), now)
+                        if retry is None and exc.code == 403 and kind.startswith("gp"):
+                            retry = now + timedelta(seconds=CACHE_SECONDS)
+                        if retry is not None:
+                            _atomic_write(throttle_path, json.dumps({"retry_at": _iso(retry)}).encode())
+                    error: Exception = exc
+                finally:
+                    exc.close()
             except (OSError, URLError, ValueError, RuntimeError) as exc:
                 error = exc
             _check_cancel(cancel)

@@ -288,6 +288,7 @@ def compute_manual_ephemeris(
         itrs_position_km=itrs_p, itrs_velocity_km_s=itrs_v,
         gcrs_position_km=position, gcrs_velocity_km_s=velocity,
         geodetic_deg_km=geo, earth_rotation=rotation, native_frame="GCRS",
+        elapsed_si_seconds=tuple(float(value) for value in seconds),
         warnings=tuple(warnings),
         provenance={
             "earth_data": earth_provenance,

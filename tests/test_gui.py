@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pytest
 from PySide6.QtCore import QDateTime, QTimeZone, Qt
-from PySide6.QtWidgets import QPlainTextEdit
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QPlainTextEdit
 
 os.environ["ORBIT_WIZARD_DISABLE_3D"] = "1"
 
@@ -99,6 +99,92 @@ def test_table_model_reads_immutable_result(window):
     assert model.rowCount() == 3
     assert model.data(model.index(0, 1), Qt.DisplayRole) == "7,000.000000"
     assert not result.teme_position_km.flags.writeable
+
+
+@pytest.mark.parametrize("epoch,elapsed", [
+    (datetime(2016, 12, 31, 23, 59, 59, tzinfo=timezone.utc), [0, 2, 3]),
+    (datetime(2024, 1, 1, tzinfo=timezone.utc), [0, 1, 2]),
+])
+def test_playback_uses_calculation_elapsed_seconds(window, monkeypatch, epoch, elapsed):
+    import orbit_wizard_blue.gui.window as gui_window
+    from orbit_wizard_blue.manual import KeplerianElements, ManualOrbitInput
+    from orbit_wizard_blue.numerical import compute_manual_ephemeris
+
+    manual = ManualOrbitInput("Leap", epoch, elements=KeplerianElements(7000, 0, 0, 0, 0, 0),
+                              gravity_model="two_body")
+    result = compute_manual_ephemeris(manual, OrbitRequest(epoch, epoch + timedelta(seconds=2), 1), None)
+    window._calculation_done(result)
+    assert window._sample_seconds == pytest.approx(elapsed)
+    clock = [100.0]
+    monkeypatch.setattr(gui_window, "monotonic", lambda: clock[0])
+    window.speed_combo.setCurrentIndex(0)
+    window._toggle_play()
+    clock[0] = 100 + elapsed[1] - 0.1
+    window._play_tick()
+    assert window.slider.value() == 0
+    clock[0] = 100 + elapsed[1]
+    window._play_tick()
+    assert window.slider.value() == 1
+    clock[0] = 100 + elapsed[2]
+    window._play_tick()
+    assert window.slider.value() == 2
+    assert not window._playing
+
+
+@pytest.mark.parametrize("existing,chosen_suffix", [
+    (("json",), ".csv"),
+    (("csv",), ".csv"),
+    (("csv", "json"), ".csv"),
+    (("json",), ".txt"),
+])
+@pytest.mark.parametrize("answer", [QMessageBox.No, QMessageBox.Yes])
+def test_export_confirms_every_existing_destination(
+        window, tmp_path, qtbot, monkeypatch, existing, chosen_suffix, answer):
+    window._calculation_done(make_result())
+    chosen = tmp_path / f"satellite{chosen_suffix}"
+    csv_path = tmp_path / "satellite.csv"
+    json_path = tmp_path / "satellite.json"
+    original = {}
+    for suffix in existing:
+        path = tmp_path / f"satellite.{suffix}"
+        content = b"existing " + suffix.encode()
+        path.write_bytes(content)
+        original[path] = content
+    prompts = []
+
+    def choose_file(*args, **kwargs):
+        assert kwargs["options"] & QFileDialog.DontConfirmOverwrite
+        return str(chosen), ""
+
+    def confirm(_parent, _title, message, _buttons, default):
+        prompts.append(message)
+        assert default == QMessageBox.No
+        return answer
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", choose_file)
+    monkeypatch.setattr(QMessageBox, "question", confirm)
+    window.export_result()
+
+    assert len(prompts) == 1
+    assert all(f"satellite.{suffix}" in prompts[0] for suffix in existing)
+    if answer == QMessageBox.No:
+        assert window._thread is None
+        assert all(path.read_bytes() == content for path, content in original.items())
+        assert all(path.exists() == (path in original) for path in (csv_path, json_path))
+    else:
+        qtbot.waitUntil(lambda: window._thread is None, timeout=5000)
+        assert csv_path.read_bytes().startswith(b"\xef\xbb\xbf")
+        assert b'"schema_version": 3' in json_path.read_bytes()
+
+
+def test_export_new_destination_needs_no_confirmation(window, tmp_path, qtbot, monkeypatch):
+    window._calculation_done(make_result())
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(tmp_path / "new.csv"), ""))
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: pytest.fail("unexpected overwrite prompt"))
+    window.export_result()
+    qtbot.waitUntil(lambda: window._thread is None, timeout=5000)
+    assert (tmp_path / "new.csv").is_file()
+    assert (tmp_path / "new.json").is_file()
 
 
 def test_data_status_distinguishes_current_and_result_sources(window, tmp_path):

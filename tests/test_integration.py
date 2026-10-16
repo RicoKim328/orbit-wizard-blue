@@ -31,8 +31,8 @@ class _Response:
     def __init__(self, payload):
         self._stream = BytesIO(payload)
 
-    def read(self):
-        return self._stream.read()
+    def read(self, size=-1):
+        return self._stream.read(size)
 
     def close(self):
         self._stream.close()

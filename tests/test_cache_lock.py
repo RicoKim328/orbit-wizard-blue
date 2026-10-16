@@ -39,8 +39,8 @@ def _cache_worker(cache_dir, start, counter, result_queue):
         def __init__(self):
             self.stream = BytesIO(json.dumps([_GP]).encode())
 
-        def read(self):
-            return self.stream.read()
+        def read(self, size=-1):
+            return self.stream.read(size)
 
         def close(self):
             self.stream.close()
@@ -127,8 +127,8 @@ def test_concurrent_initial_force_earth_fetches_each_source_once(tmp_path):
         def __init__(self, payload):
             self.stream = BytesIO(payload)
 
-        def read(self):
-            return self.stream.read()
+        def read(self, size=-1):
+            return self.stream.read(size)
 
         def close(self):
             self.stream.close()
@@ -167,11 +167,14 @@ def test_concurrent_failed_force_returns_same_stale_cache(tmp_path):
         status = 200
         headers = {}
 
-        def read(self):
-            return json.dumps([_GP]).encode()
+        def __init__(self):
+            self.stream = BytesIO(json.dumps([_GP]).encode())
+
+        def read(self, size=-1):
+            return self.stream.read(size)
 
         def close(self):
-            pass
+            self.stream.close()
 
     def opener(request, timeout):
         nonlocal calls

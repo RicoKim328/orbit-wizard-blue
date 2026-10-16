@@ -34,8 +34,8 @@ class Response:
         self.status = status
         self.headers = headers or {}
 
-    def read(self):
-        return self.stream.read()
+    def read(self, size=-1):
+        return self.stream.read(size)
 
     def getcode(self):
         return self.status
@@ -124,6 +124,65 @@ def test_invalid_refresh_retains_last_good_and_does_not_freshen(tmp_path):
     assert calls == 2
     service.get_satellite("12345", force=True)
     assert calls == 3
+
+
+def test_gp_response_at_size_limit_is_accepted(tmp_path):
+    payload = body()
+    payload += b" " * (5_000_000 - len(payload))
+    service = DataService(tmp_path, opener=lambda request, timeout: Response(payload))
+
+    assert service.get_satellite("12345").payload["OBJECT_NAME"] == "TEST SAT"
+
+
+def test_oversized_response_stops_at_limit_and_keeps_last_good(tmp_path):
+    now = [datetime(2026, 10, 15, tzinfo=timezone.utc)]
+    first = Response(body())
+
+    class OversizedResponse(Response):
+        def __init__(self):
+            super().__init__(b"x" * 5_100_000)
+            self.read_bytes = 0
+
+        def read(self, size=-1):
+            assert 0 < size <= 65_536
+            chunk = super().read(size)
+            self.read_bytes += len(chunk)
+            return chunk
+
+    oversized = OversizedResponse()
+    responses = iter((first, oversized))
+    service = DataService(tmp_path, opener=lambda request, timeout: next(responses), clock=lambda: now[0])
+    original = service.get_satellite("12345")
+    now[0] += timedelta(hours=2)
+
+    stale = service.get_satellite("12345")
+    assert stale.stale and stale.sha256 == original.sha256
+    assert oversized.read_bytes == 5_000_001
+    assert oversized.stream.closed
+
+
+def test_cancel_during_response_read_closes_stream_and_preserves_cache(tmp_path):
+    now = [datetime(2026, 10, 15, tzinfo=timezone.utc)]
+    stopped = Event()
+
+    class CancellingResponse(Response):
+        def read(self, size=-1):
+            chunk = super().read(size)
+            stopped.set()
+            return chunk
+
+    candidate = CancellingResponse(body() + b" " * 100_000)
+    responses = iter((Response(body()), candidate))
+    service = DataService(tmp_path, opener=lambda request, timeout: next(responses), clock=lambda: now[0])
+    original = service.get_satellite("12345")
+    now[0] += timedelta(hours=2)
+
+    with pytest.raises(CancelledError):
+        service.get_satellite("12345", cancel=stopped)
+    content_path, meta_path, _, failure_path = service._paths(original.source_url, "gp")
+    assert service._read_cache(content_path, meta_path, original.source_url)[1]["sha256"] == original.sha256
+    assert not failure_path.exists()
+    assert candidate.stream.closed
 
 
 @pytest.mark.parametrize(
@@ -294,6 +353,30 @@ def test_search_no_results_is_distinct_from_provider_error(tmp_path):
     assert calls == 1
     with pytest.raises(RuntimeError, match="Data unavailable"):
         service.search_satellites("other")
+
+
+def test_oversized_search_404_body_stops_at_limit_and_closes(tmp_path):
+    class TrackingBody(BytesIO):
+        def __init__(self):
+            super().__init__(b"x" * 5_100_000)
+            self.read_bytes = 0
+
+        def read(self, size=-1):
+            assert 0 < size <= 65_536
+            chunk = super().read(size)
+            self.read_bytes += len(chunk)
+            return chunk
+
+    response_body = TrackingBody()
+
+    def opener(request, timeout):
+        raise HTTPError(request.full_url, 404, "Not found", {}, response_body)
+
+    service = DataService(tmp_path, opener=opener)
+    with pytest.raises(RuntimeError, match="Data unavailable"):
+        service.search_satellites("missing")
+    assert response_body.read_bytes == 5_000_001
+    assert response_body.closed
 
 
 def test_resolve_search_selection_reuses_query_and_checks_ttl(tmp_path):

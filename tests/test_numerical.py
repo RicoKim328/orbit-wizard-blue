@@ -178,6 +178,7 @@ def test_leap_second_is_counted_in_integration_elapsed_time():
     # The datetime grid omits the :60 label, so 00:00:00 is two physical seconds after 23:59:59.
     angular_rate = sqrt(MU / RADIUS**3)
     assert result.times_utc[1] == "2017-01-01T00:00:00.000000Z"
+    assert result.elapsed_si_seconds == (0.0, 2.0, 3.0)
     assert result.gcrs_position_km[1, 1] == pytest.approx(RADIUS * np.sin(2 * angular_rate), abs=1e-6)
     assert result.gcrs_position_km[2, 1] == pytest.approx(RADIUS * np.sin(3 * angular_rate), abs=1e-6)
 

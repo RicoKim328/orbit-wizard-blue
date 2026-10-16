@@ -1,6 +1,7 @@
 """Numerical behavior and failure boundaries for ephemeris computation."""
 
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -65,10 +66,44 @@ def test_nested_metadata_is_frozen_and_can_be_thawed():
 def test_utc_grid_includes_only_exact_steps_and_limit():
     result = compute_ephemeris(snapshot(), OrbitRequest(EPOCH, EPOCH + timedelta(seconds=125), 60), None)
     assert result.times_utc == tuple((EPOCH + timedelta(seconds=n)).isoformat(timespec="microseconds").replace("+00:00", "Z") for n in (0, 60, 120))
+    assert result.elapsed_si_seconds == (0.0, 60.0, 120.0)
     with pytest.raises(ValidationError, match="100000"):
         compute_ephemeris(snapshot(), OrbitRequest(EPOCH, EPOCH + timedelta(seconds=100000), 1), None)
     with pytest.raises(ValidationError, match="positive integer"):
         compute_ephemeris(snapshot(), OrbitRequest(EPOCH, EPOCH, 0), None)
+
+
+def test_playback_elapsed_seconds_use_selected_leap_table(tmp_path):
+    epoch = datetime(2016, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+    fields = dict(FIXTURE["elements"], EPOCH="2016-12-31T23:59:59")
+    source = DataSnapshot(fields, "test", "fetch", "check", "hash")
+    request = OrbitRequest(epoch, epoch + timedelta(seconds=2), 1)
+    bundled = compute_ephemeris(source, request, None)
+    assert bundled.elapsed_si_seconds == (0.0, 2.0, 3.0)
+
+    # A valid supplied table without the 2017 leap must change the elapsed clock.
+    leap_path = tmp_path / "leaps.dat"
+    lines = Path(iers.IERS_LEAP_SECOND_FILE).read_text().splitlines()
+    leap_path.write_text("\n".join(line for line in lines if not line.lstrip().startswith("57754.0")) + "\n")
+    supplied = EarthData(Path(iers.IERS_A_FILE), leap_path, {})
+    altered = compute_ephemeris(source, request, supplied)
+    assert altered.elapsed_si_seconds == (0.0, 1.0, 2.0)
+
+    missing = EarthData(Path(iers.IERS_A_FILE), tmp_path / "missing", {})
+    fallback = compute_ephemeris(source, request, missing)
+    assert fallback.elapsed_si_seconds == bundled.elapsed_si_seconds
+
+
+def test_elapsed_seconds_are_immutable_and_ordered():
+    result = compute_ephemeris(snapshot(), OrbitRequest(EPOCH, EPOCH + timedelta(seconds=120), 60), None)
+    values = [0.0, 60.0, 120.0]
+    copy = replace(result, elapsed_si_seconds=values)
+    values[1] = 999.0
+    assert copy.elapsed_si_seconds == (0.0, 60.0, 120.0)
+    with pytest.raises(ValidationError, match="Elapsed SI seconds"):
+        replace(result, elapsed_si_seconds=(0.0, 60.0, 60.0))
+    with pytest.raises(ValidationError, match="Elapsed SI seconds"):
+        replace(result, elapsed_si_seconds=(0.0, float("nan"), 120.0))
 
 
 def test_cancel_before_and_during_propagation():

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from math import isfinite
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -108,6 +109,7 @@ class OrbitResult:
     provenance: Mapping[str, Any] = field(default_factory=dict)
     gcrs_velocity_km_s: NDArray[np.float64] | None = None
     native_frame: str = "TEME"
+    elapsed_si_seconds: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
         n = len(self.times_utc)
@@ -128,3 +130,10 @@ class OrbitResult:
         object.__setattr__(self, "earth_rotation", _readonly_array(self.earth_rotation, (n, 3, 3)))
         object.__setattr__(self, "warnings", tuple(self.warnings))
         object.__setattr__(self, "provenance", freeze_json(self.provenance))
+        if self.elapsed_si_seconds is not None:
+            elapsed = tuple(round(float(value), 6) for value in self.elapsed_si_seconds)
+            if (len(elapsed) != n or not elapsed or elapsed[0] != 0.0
+                    or not all(isfinite(value) for value in elapsed)
+                    or any(right <= left for left, right in zip(elapsed, elapsed[1:]))):
+                raise ValidationError("Elapsed SI seconds must start at zero and increase for each sample")
+            object.__setattr__(self, "elapsed_si_seconds", elapsed)

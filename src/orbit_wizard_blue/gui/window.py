@@ -764,9 +764,12 @@ class MainWindow(QMainWindow):
             current.setText(_match_label(self.snapshot))
         self._show_source_status()
         self._show_result_summary()
-        self._sample_seconds = [(datetime.fromisoformat(t.replace("Z", "+00:00"))
-                                 - datetime.fromisoformat(result.times_utc[0].replace("Z", "+00:00"))).total_seconds()
-                                for t in result.times_utc]
+        if result.elapsed_si_seconds is not None:
+            self._sample_seconds = list(result.elapsed_si_seconds)
+        else:
+            self._sample_seconds = [(datetime.fromisoformat(t.replace("Z", "+00:00"))
+                                     - datetime.fromisoformat(result.times_utc[0].replace("Z", "+00:00"))).total_seconds()
+                                    for t in result.times_utc]
         for model in self.models:
             model.set_result(result)
         itrs_available = result.itrs_position_km is not None
@@ -789,15 +792,25 @@ class MainWindow(QMainWindow):
             return
         proposed = (f"orbit-{_id(result.satellite)}.csv" if result.satellite.source_kind != "manual"
                     else "orbit-manual.csv")
-        chosen, _ = QFileDialog.getSaveFileName(self, "결과 CSV 저장", proposed, "CSV 파일 (*.csv)")
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, "결과 CSV 저장", proposed, "CSV 파일 (*.csv)",
+            options=QFileDialog.DontConfirmOverwrite)
         if not chosen:
+            return
+        csv_path = Path(chosen).with_suffix(".csv")
+        json_path = csv_path.with_suffix(".json")
+        existing = [path.name for path in (csv_path, json_path) if path.exists()]
+        if existing and QMessageBox.question(
+                self, "기존 파일 덮어쓰기",
+                "다음 파일이 이미 있습니다. 덮어쓰시겠습니까?\n" + "\n".join(existing),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
 
         def task(progress, cancel):
             from orbit_wizard_blue.export import export_ephemeris
 
             progress(10, "CSV와 메타데이터 저장 중…")
-            return export_ephemeris(result, Path(chosen))
+            return export_ephemeris(result, csv_path)
 
         self._start_task("결과 저장 중…", task, self._export_done)
 

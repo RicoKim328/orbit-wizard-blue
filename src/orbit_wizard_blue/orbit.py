@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version
 from math import floor
+from pathlib import Path
 from threading import RLock
 from typing import Callable, Iterator
 
@@ -108,10 +109,7 @@ def _earth_context(earth_data: EarthData) -> Iterator[tuple[iers.IERS_A, iers.Le
             # The explicit readers accept local Path objects. Unlike ``open``,
             # they never interpret a source as a URL or consult Astropy's cache.
             table = iers.IERS_A.read(file=earth_data.iers_path)
-            try:
-                leaps = iers.LeapSeconds.from_iers_leap_seconds(earth_data.leap_seconds_path)
-            except ValueError:
-                leaps = iers.LeapSeconds.from_leap_seconds_list(earth_data.leap_seconds_path)
+            leaps = _read_leaps(earth_data.leap_seconds_path)
             erfa.leap_seconds.set(leaps)
             with iers.earth_orientation_table.set(table):
                 yield table, leaps
@@ -119,6 +117,37 @@ def _earth_context(earth_data: EarthData) -> Iterator[tuple[iers.IERS_A, iers.Le
             erfa.leap_seconds.set(old_leaps)
             iers.conf.auto_download = old_download
             iers.conf.iers_degraded_accuracy = old_accuracy
+            iers.conf.iers_leap_second_auto_url = old_iers_leap_url
+            iers.conf.ietf_leap_second_auto_url = old_ietf_leap_url
+
+
+def _read_leaps(path: Path) -> iers.LeapSeconds:
+    try:
+        return iers.LeapSeconds.from_iers_leap_seconds(path)
+    except ValueError:
+        return iers.LeapSeconds.from_leap_seconds_list(path)
+
+
+@contextmanager
+def _timing_context(earth_data: EarthData | None) -> Iterator[None]:
+    """Use an explicit local leap table while building SGP4 UTC times."""
+    bundled = Path(iers.IERS_LEAP_SECOND_FILE)
+    selected = earth_data.leap_seconds_path if earth_data is not None else bundled
+    try:
+        leaps = _read_leaps(selected)
+    except (OSError, ValueError, TypeError, IndexError):
+        leaps = _read_leaps(bundled)
+    with _EARTH_LOCK:
+        old_leaps = erfa.leap_seconds.get()
+        old_iers_leap_url = iers.conf.iers_leap_second_auto_url
+        old_ietf_leap_url = iers.conf.ietf_leap_second_auto_url
+        try:
+            iers.conf.iers_leap_second_auto_url = ""
+            iers.conf.ietf_leap_second_auto_url = ""
+            erfa.leap_seconds.set(leaps)
+            yield
+        finally:
+            erfa.leap_seconds.set(old_leaps)
             iers.conf.iers_leap_second_auto_url = old_iers_leap_url
             iers.conf.ietf_leap_second_auto_url = old_ietf_leap_url
 
@@ -204,19 +233,23 @@ def compute_ephemeris(
     _notify(progress, 0, "SGP4 propagation")
     position = np.empty((n, 3), dtype=np.float64)
     velocity = np.empty((n, 3), dtype=np.float64)
-    for left in range(0, n, _CHUNK):
-        _check_cancel(cancel)
-        right = min(left + _CHUNK, n)
-        time = Time(instants[left:right], scale="utc")
-        errors, p, v = satellite.sgp4_array(np.asarray(time.jd1), np.asarray(time.jd2))
-        bad = np.flatnonzero((errors != 0) | ~np.isfinite(p).all(axis=1) | ~np.isfinite(v).all(axis=1))
-        if len(bad):
-            index = left + int(bad[0])
-            code = int(errors[bad[0]])
-            raise ValidationError(f"SGP4 failed at {_iso_utc(instants[index])}: {SGP4_ERRORS.get(code, 'non-finite position/velocity')}")
-        position[left:right] = p
-        velocity[left:right] = v
-        _notify(progress, min(50, round(50 * right / n)), "SGP4 propagation")
+    elapsed = np.empty(n, dtype=np.float64)
+    with _timing_context(earth_data):
+        origin = Time(instants[0], scale="utc")
+        for left in range(0, n, _CHUNK):
+            _check_cancel(cancel)
+            right = min(left + _CHUNK, n)
+            time = Time(instants[left:right], scale="utc")
+            elapsed[left:right] = (time - origin).to_value(u.s)
+            errors, p, v = satellite.sgp4_array(np.asarray(time.jd1), np.asarray(time.jd2))
+            bad = np.flatnonzero((errors != 0) | ~np.isfinite(p).all(axis=1) | ~np.isfinite(v).all(axis=1))
+            if len(bad):
+                index = left + int(bad[0])
+                code = int(errors[bad[0]])
+                raise ValidationError(f"SGP4 failed at {_iso_utc(instants[index])}: {SGP4_ERRORS.get(code, 'non-finite position/velocity')}")
+            position[left:right] = p
+            velocity[left:right] = v
+            _notify(progress, min(50, round(50 * right / n)), "SGP4 propagation")
 
     warnings: list[str] = []
     if snapshot.warning:
@@ -294,6 +327,7 @@ def compute_ephemeris(
         gcrs_position_km=gcrs_p,
         geodetic_deg_km=geo,
         earth_rotation=rotation,
+        elapsed_si_seconds=tuple(float(value) for value in elapsed),
         warnings=tuple(warnings),
         provenance={
             "earth_data": earth_provenance,
