@@ -22,11 +22,11 @@ Pre-flight: `git grep` for imports of requests/urllib3/certifi/idna/charset_norm
 | AC-DEPS-004 | PASS | fresh venv: `pip check` → "No broken requirements found." (exit 0); `pip show` of the five → "Package(s) not found" (exit 1); `find_spec` check exit 0 |
 | AC-DEPS-005 | PASS | fresh venv: `--smoke-test` exit 0 (same line as baseline); `ruff check src tests tools` → "All checks passed!"; pytest `169 passed, 4 warnings` |
 | AC-DEPS-006 | PASS | `git diff --name-only <base_sha>..HEAD -- . ':(exclude).moai'` → `LICENSES.txt`, `pyproject.toml`, `requirements.txt`; no `import requests` in src/tests/tools (`exit=1`) |
-| AC-DEPS-007 | PENDING | see CI result below once the run completes |
+| AC-DEPS-007 | PASS | head commit ff11382 (evidence-only commit on top of run commit 650bce3); `gh run list --workflow build.yml --commit ff11382...` → `39035500794 completed success`; job `windows`: success |
 
 ## §E.3 Run-phase Audit-Ready Signal
 
-run_status: audit-ready (AC-DEPS-001..006 PASS; AC-DEPS-007 pending CI)
+run_status: audit-ready (AC-DEPS-001..007 PASS)
 run_complete_at: 2026-10-17
 
 ## §E.4 Sync-phase Audit-Ready Signal
