@@ -15,7 +15,6 @@
 | pyerfa | 2.0.1.5 | ERFA; pinned only in `requirements.txt` (transitive via astropy) although `orbit.py:14` imports `erfa` directly |
 | sgp4 | 2.24 | SGP4 propagation, OMM/TLE handling |
 | platformdirs | 4.4.0 | cache / data / log directories |
-| requests | 2.32.5 | declared, not imported (see Known Risks) |
 
 Rationale: exact pins plus pinned transitive deps in `requirements.txt` support deterministic results and reproducible PyInstaller builds. HTTP uses the standard library `urllib.request`.
 
@@ -65,7 +64,6 @@ Single job `windows` on `windows-latest`, triggered on push and `workflow_dispat
 
 | Risk | Evidence |
 |---|---|
-| `requests` declared but unused; HTTP uses `urllib` | `pyproject.toml` dependencies; `data.py:15-17` imports `urllib`; no `import requests` in `src/` |
 | Hardcoded User-Agent version differs from package version | `data.py:401` `orbit-wizard-blue/1.0` vs `pyproject.toml` `version = "0.1.0"` |
 | `MainWindow` mixes many concerns in one file | `gui/window.py` 919 lines, single class from line 44 |
 | Verification code ships in the runtime package | `src/orbit_wizard_blue/gui_validation.py` (321 lines) |

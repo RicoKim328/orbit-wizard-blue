@@ -31,4 +31,12 @@ run_complete_at: 2026-10-17
 
 ## §E.4 Sync-phase Audit-Ready Signal
 
-_<pending sync-phase>_
+sync_status: audit-ready
+sync_complete_at: 2026-10-17
+
+Sync evidence (head be16add):
+- Quality: `ruff check src tests tools` → All checks passed!; pytest `169 passed, 4 warnings`.
+- Divergence: none. Run commit 650bce3 touched only `pyproject.toml`, `requirements.txt`, `LICENSES.txt` as planned (0 added, 7 deleted lines); no unplanned files or dependency changes.
+- Docs updated: `.moai/project/tech.md` (removed requests row and Known Risks row), `.moai/project/product.md` (removed completed roadmap item), `.moai/project/codemaps/dependencies.md` (removed requests row).
+- Skipped: CHANGELOG (none in repo), README (no requests mention), structure.md (no structural change), MX tags (no source changes).
+- SPEC status: draft → completed (lifecycle spec-anchored; AC-DEPS-001..007 PASS).

@@ -13,7 +13,6 @@
 | pyerfa (`erfa`) | `orbit.py` |
 | sgp4 | `orbit.py`, `tle.py` |
 | platformdirs | `data.py`, `local_data.py`, `user_store.py`, `__main__.py` |
-| requests | none (declared only) |
 
 Standard library highlights: `urllib.request` (HTTP), `sqlite3`, `threading`, `hashlib`, `tempfile`, `csv`, `argparse`, `logging.handlers.RotatingFileHandler`.
 

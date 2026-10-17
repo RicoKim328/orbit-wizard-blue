@@ -2,7 +2,7 @@
 id: SPEC-DEPS-001
 title: "Remove unused requests dependency and its exclusive transitive pins"
 version: "0.1.1"
-status: draft
+status: completed
 created: 2026-10-17
 updated: 2026-10-17
 author: Rico

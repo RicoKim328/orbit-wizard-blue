@@ -43,7 +43,6 @@ Anything not implemented in code: other data sources than CelesTrak GP and local
 
 These come from the code review behind this document. They are candidates only, not planned work.
 
-- Remove the unused `requests` dependency (no import in `src/`; HTTP uses `urllib`).
 - Add a Linux CI job (CI is Windows-only although Linux/macOS development is documented).
 - Split `MainWindow` (`gui/window.py`, 919 lines) into smaller units.
 - Move `gui_validation.py` out of the runtime package, or gate it behind the frozen-build check.
