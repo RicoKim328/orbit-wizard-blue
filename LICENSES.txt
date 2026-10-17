@@ -9,7 +9,6 @@ NumPy: BSD-3-Clause, https://numpy.org/about/
 SciPy: BSD-3-Clause, https://scipy.org/
 Astropy / astropy-iers-data / PyERFA: BSD-3-Clause, https://www.astropy.org/
 sgp4: MIT, https://pypi.org/project/sgp4/
-Requests: Apache-2.0, https://requests.readthedocs.io/
 platformdirs: MIT, https://github.com/tox-dev/platformdirs
 
 For exact package versions see requirements.txt.
