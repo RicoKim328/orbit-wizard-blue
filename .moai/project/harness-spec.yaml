@@ -1,0 +1,18 @@
+# .moai/project/harness-spec.yaml — machine-readable harness generation input
+# Generated from .moai/project/interview.md
+
+domain: satellite-orbit-propagation
+goal: "Keep developing orbit-wizard-blue as a desktop app that computes and visualizes satellite orbits (SGP4 from CelesTrak/local TLE and manual numerical propagation) with table, 3D, ground-track and CSV export output."
+constraints:
+  - "Offline operation and deterministic results (smoke test, offline fixtures, no implicit astropy network access)"
+  - "Windows distribution via PyInstaller onedir build (software OpenGL compatibility)"
+scope: "In scope: CelesTrak GP data with 2-hour cache, local GP JSON/TLE import, SGP4 ephemeris, manual Keplerian/state propagation, TEME/GCRS/ITRS/geodetic output, ground track, 3D view, CSV plus metadata JSON export. Out of scope: anything not implemented in code (other data sources, web or mobile versions)."
+
+verification: ".venv/bin/python -m ruff check src tests tools && QT_QPA_PLATFORM=offscreen ORBIT_WIZARD_DISABLE_3D=1 .venv/bin/python -m pytest -q"
+external_systems:
+  - "CelesTrak GP API"
+  - "IERS and leap-second data hosts (astropy defaults)"
+  - "Local filesystem (cache, user data, logs)"
+  - "Local SQLite"
+ui_surface: has-ui
+team_sharing: solo
