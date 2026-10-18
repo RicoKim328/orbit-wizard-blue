@@ -46,7 +46,7 @@ scan() { awk 'BEGIN{inb=0} /^```/ { if (inb) inb=0; else inb=(prev ~ /Proposed r
 - Given the change is applied
 - When `test -f .claude/rules/project/git-ownership.md; echo "exit=$?"` and `grep -c '^paths:' .claude/rules/project/git-ownership.md` are run
 - Then they print `exit=0` and `0` (the rule has no `paths:` key)
-- And each of the four commands `grep -c -F 'Only the orchestrator (Astra) runs git or gh' FILE`, `grep -c -F 'proposed repository action' FILE`, `grep -c -F 'takes precedence over' FILE`, and `grep -c -F 'spec-workflow.md' FILE` (with `FILE` = `.claude/rules/project/git-ownership.md`) prints at least `1`
+- And each of the four commands `grep -c -F 'Only the orchestrator runs git or gh' FILE`, `grep -c -F 'proposed repository action' FILE`, `grep -c -F 'takes precedence over' FILE`, and `grep -c -F 'spec-workflow.md' FILE` (with `FILE` = `.claude/rules/project/git-ownership.md`) prints at least `1`
 - And `wc -l < .claude/rules/project/git-ownership.md` prints at most `40`, and `grep -c -F 'proposal-only' .claude/rules/project/git-ownership.md` prints at least `1`
 - And `grep -n -F 'Route A' .claude/rules/project/git-ownership.md` and `grep -n -F 'Route B' .claude/rules/project/git-ownership.md` each print at least one line
 
@@ -57,7 +57,7 @@ scan() { awk 'BEGIN{inb=0} /^```/ { if (inb) inb=0; else inb=(prev ~ /Proposed r
 
 ### AC-GITOWN-007 — Prohibition sentence is present (REQ-GITOWN-004)
 - Given the change is applied
-- When `grep -L -F 'Only the orchestrator (Astra) runs git or gh' A5` (the five paths) is run
+- When `grep -L -F 'Only the orchestrator runs git or gh' A5` (the five paths) is run
 - Then it prints nothing
 
 ### AC-GITOWN-008 — manager-git holds no execution authority (REQ-GITOWN-005)
@@ -65,10 +65,10 @@ scan() { awk 'BEGIN{inb=0} /^```/ { if (inb) inb=0; else inb=(prev ~ /Proposed r
 - When `awk 'NR==1{next} /^---$/{exit} {print}' $AG/manager-git.md | grep -c -E 'Bash|bypassPermissions'` is run
 - Then it prints `0` (the frontmatter names neither)
 
-### AC-GITOWN-009 — AGENTS.md is untouched (REQ-GITOWN-006) [coordinator-run]
-- Given the run-phase commit exists
-- When `git diff --quiet <base_sha>..HEAD -- AGENTS.md; echo "exit=$?"` is run
-- Then it prints `exit=0`
+### AC-GITOWN-009 — AGENTS.md keeps its ownership rule and loses only the Astra name (REQ-GITOWN-006) [coordinator-run]
+- Given the follow-up that replaced "Astra" in `AGENTS.md` (the name is a leftover of earlier Codex work)
+- When `grep -c -F 'Astra' AGENTS.md`, `grep -c -F 'Sub-agents must not run `git` or `gh` commands (including read-only commands)' AGENTS.md`, and `git diff --numstat <base_sha> -- AGENTS.md` are run
+- Then they print `0`, `1`, and a line `3<TAB>3<TAB>AGENTS.md` (three lines replaced, none added or removed: the ownership rule is intact and only the name changed)
 
 ### AC-GITOWN-010 — No carve-out wording in any edited file (REQ-GITOWN-006)
 - Given the change is applied
@@ -85,9 +85,9 @@ scan() { awk 'BEGIN{inb=0} /^```/ { if (inb) inb=0; else inb=(prev ~ /Proposed r
 
 ### AC-GITOWN-012 — Exactly the 14 files are tracked and changed (REQ-GITOWN-007) [coordinator-run]
 - Given the run-phase commit exists
-- When `git ls-files --error-unmatch` is run with the 14 paths of the edited set, then `git status --porcelain --` with the same paths, then `git diff --name-only <base_sha>..HEAD -- . ':(exclude).moai/specs'`
+- When `git ls-files --error-unmatch` is run with the 14 paths of the edited set, then `git status --porcelain --` with the same paths, then `git diff --name-only <base_sha>..HEAD -- . ':(exclude).moai/specs' ':(exclude)AGENTS.md'`
 - Then the first prints the 14 paths and exits 0, the second prints nothing, and the third prints exactly the 14 paths
-- And `git diff --name-only <base_sha>..HEAD -- AGENTS.md` prints nothing, and `sha256sum -c "$SCRATCH/protected.sha256"` reports `OK` for every recorded file (all `.claude/rules/moai/**` rules, all `.claude/hooks/moai/*.sh`, all `.moai/config/sections/*.yaml`, and the `moai` binary are unchanged)
+- And `git diff --name-only <base_sha> -- AGENTS.md` prints exactly `AGENTS.md` (the name replacement of AC-GITOWN-009), and `sha256sum -c "$SCRATCH/protected.sha256"` reports `OK` for every recorded file (all `.claude/rules/moai/**` rules, all `.claude/hooks/moai/*.sh`, all `.moai/config/sections/*.yaml`, and the `moai` binary are unchanged)
 
 ### AC-GITOWN-013 — `moai update` treatment is measured (supports REQ-GITOWN-007) [coordinator-run]
 - Given the scratch copy defined in Conventions (it contains the 14 files), an empty `$SCRATCH/updhome`, and `moai update --help` output saved in `progress.md` §E.2
@@ -106,5 +106,5 @@ scan() { awk 'BEGIN{inb=0} /^```/ { if (inb) inb=0; else inb=(prev ~ /Proposed r
 
 - AC-GITOWN-001 to -010 and -012 pass with recorded output; AC-GITOWN-011 passes or is reported as a Gap with the reason; AC-GITOWN-013 is recorded.
 - The RED baselines of AC-GITOWN-002 and -004 are recorded before the first edit.
-- No file outside the 14-file edited set changes; `AGENTS.md` is byte-identical to `<base_sha>` (`git diff`), and `spec-workflow.md` and the other protected files match the recorded sha256 values.
+- No file outside the 14-file edited set changes, except `AGENTS.md`, which differs from `<base_sha>` only by the Astra-name replacement (AC-GITOWN-009), and `spec-workflow.md` and the other protected files match the recorded sha256 values.
 - plan-auditor PASS threshold for Tier M: 0.80.

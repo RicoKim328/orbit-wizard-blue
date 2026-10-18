@@ -1,8 +1,8 @@
 ---
 id: SPEC-GITOWN-001
 title: "Align MoAI agent and workflow Git instructions with orchestrator-only Git ownership"
-version: "0.3.0"
-status: in-progress
+version: "0.4.0"
+status: completed
 created: 2026-10-18
 updated: 2026-10-18
 author: Rico
@@ -23,12 +23,13 @@ tier: M
 | 0.1.0 | 2026-10-18 | Rico | Initial draft (Tier S) |
 | 0.2.0 | 2026-10-18 | Rico | Iteration 2 (plan-audit findings X-1..X-5, X-7..X-9, G-1..G-8): Tier M with acceptance.md; coordinator = MoAI orchestrator; manager-git kept as proposal-only; `spec-workflow.md` (Frozen) left unedited and overridden by a new project rule; complete conflict inventory; negative scan ACs; carve-out AC; single tracking scope |
 | 0.3.0 | 2026-10-18 | Rico | Iteration 3 (re-audit G2-1..G2-6, C-1..C-3): sha256 record replaces `git diff` on untracked protected files; inventory adds `manager-docs.md:8`, `run.md:165`, `plan/spec-assembly.md:336`; Scan S verb list extended; rule-layout sentence corrected; override rule size-bounded and states that other `manager-git` references now mean proposal-only; contiguous `base_sha`; defined scratch copy |
+| 0.4.0 | 2026-10-18 | Rico | Post-run amendment: the "Astra" name is a leftover of earlier Codex work and is removed; `AGENTS.md` may change only by replacing "Astra" with "the orchestrator" (REQ-GITOWN-006, REQ-GITOWN-007, AC-GITOWN-009, AC-GITOWN-012) |
 
 ## 1. Context
 
-This repository's `AGENTS.md` (read in this worktree) gives Git and GitHub ownership to one party. Line 13: "Only Astra may perform Git or GitHub operations. Sub-agents must not run `git` or `gh` commands (including read-only commands), access or modify `.git`, or perform repository operations through scripts, APIs, connectors, or other indirect methods. This includes staging, commits, branches, worktrees, fetch/pull/push, merges, tags, and pull requests. Ask Astra for any repository information or action needed." Line 5 names Astra as the primary coordinator; line 15 forbids beginning implementation without a concrete assignment from Astra.
+This repository's `AGENTS.md` (read in this worktree) gives Git and GitHub ownership to one party. Line 13: "Only the orchestrator may perform Git or GitHub operations. Sub-agents must not run `git` or `gh` commands (including read-only commands), access or modify `.git`, or perform repository operations through scripts, APIs, connectors, or other indirect methods. This includes staging, commits, branches, worktrees, fetch/pull/push, merges, tags, and pull requests. Ask the orchestrator for any repository information or action needed." Line 5 names the orchestrator as the primary coordinator; line 15 forbids beginning implementation without a concrete assignment from the orchestrator.
 
-User decision (iteration 2): Astra is the MoAI main session, the orchestrator. `manager-git` is kept but becomes proposal-only. In this SPEC "the orchestrator" means Astra.
+User decision (iteration 2): the orchestrator is the MoAI main session. `manager-git` is kept but becomes proposal-only. In this SPEC "the orchestrator" means the MoAI main session.
 
 The MoAI-managed agent and workflow text, untracked in the primary checkout (`/home/rico/Desktop/Project/orbit-wizard-blue`) and absent from this worktree, instructs sub-agents to do exactly what line 13 prohibits. The Codex review gate reported the conflict for `manager-git.md`, as relayed by the coordinator; it is also upstream issue https://github.com/modu-ai/moai-adk/issues/1827 item 5 (open, opened 2026-10-17, read through a WebFetch summary, which says the reporter did not reproduce it). Resolution direction (user decision): project-local hardening, tracked in git, in parallel with the upstream tracker. Expected behavior: sub-agents return a proposed repository action to the orchestrator instead of executing it.
 
@@ -98,16 +99,16 @@ The workflow files `run.md`, `plan.md`, `sync.md`, `sync/delivery.md`, `plan/spe
 The repository shall contain `.claude/rules/project/git-ownership.md`, without a `paths:` key, stating that Git and GitHub operations belong to the orchestrator only, that sub-agents return proposed repository actions, that this rule takes precedence over the Route A and Route B commit, push, branch, and PR text in `.claude/rules/moai/workflow/spec-workflow.md`, and that other MoAI references to `manager-git` as executing Git operations now mean proposal-only; the file shall be at most 40 lines long because it loads in every session.
 
 ### REQ-GITOWN-004 — Prohibition is stated in each affected agent
-Each agent definition named in REQ-GITOWN-001 shall contain the sentence "Only the orchestrator (Astra) runs git or gh; ask the orchestrator for repository information or actions." in its body.
+Each agent definition named in REQ-GITOWN-001 shall contain the sentence "Only the orchestrator runs git or gh; ask the orchestrator for repository information or actions." in its body.
 
 ### REQ-GITOWN-005 — manager-git holds no execution authority
 The frontmatter of `manager-git.md` shall not list `Bash` in `tools` and shall not set `permissionMode: bypassPermissions`.
 
 ### REQ-GITOWN-006 — Ownership rule is not weakened
-The change shall leave `AGENTS.md` unmodified, and no edited file shall contain wording that lets a sub-agent run `git` or `gh`, including read-only commands.
+The change shall leave the Git ownership rule in `AGENTS.md` intact; the only permitted change is replacing the name "Astra" with "the orchestrator" (user decision after the run phase). No edited file shall contain wording that lets a sub-agent run `git` or `gh`, including read-only commands.
 
 ### REQ-GITOWN-007 — Exactly the edited set is tracked and changed
-The repository shall track the 14 files of the edited set in git, and the change shall modify no other tracked file, hook, configuration file, or the `moai` binary.
+The repository shall track the 14 files of the edited set in git, and the change shall modify no other tracked file (apart from the name replacement in `AGENTS.md`, REQ-GITOWN-006), hook, configuration file, or the `moai` binary.
 
 ## 3. Acceptance Criteria
 
@@ -132,7 +133,7 @@ The coordinator (orchestrator) runs every verification command in `acceptance.md
 - No change to `.moai/config/sections/git-strategy.yaml` (its automation keys are not edited; their consumer was not verified).
 
 ### Out of Scope — The Frozen rule and AGENTS.md
-- No edit of `.claude/rules/moai/workflow/spec-workflow.md` and no edit of `AGENTS.md`.
+- No edit of `.claude/rules/moai/workflow/spec-workflow.md` and no edit of `AGENTS.md` other than the name replacement in REQ-GITOWN-006.
 - No creation or renaming of the `gui`, `backend_data`, and `backend_orbit` sub-agents that `AGENTS.md:7-11` names and that do not exist as MoAI agents.
 
 ### Out of Scope — Other instruction content

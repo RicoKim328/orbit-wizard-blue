@@ -80,7 +80,7 @@ Per the canonical CI auto-fix protocol, the `manager-develop` agent supports a t
 | Independent quality verdict | sync-auditor, or the orchestrator verification batch — lint + test + coverage (§C row 2) |
 | Repository operations (staging, commits, branches, worktrees, push, merge, tag, PR or issue) | the orchestrator — this agent returns a proposed repository action |
 
-Only the orchestrator (Astra) runs git or gh; ask the orchestrator for repository information or actions. Where this agent would otherwise perform a repository operation, it returns a proposed repository action — the file list, the commit subject and body, the target branch, and the exact commands, in a fenced block preceded by the label "Proposed repository action" — and the orchestrator runs it.
+Only the orchestrator runs git or gh; ask the orchestrator for repository information or actions. Where this agent would otherwise perform a repository operation, it returns a proposed repository action — the file list, the commit subject and body, the target branch, and the exact commands, in a fenced block preceded by the label "Proposed repository action" — and the orchestrator runs it.
 
 ## Implementation Cycle
 

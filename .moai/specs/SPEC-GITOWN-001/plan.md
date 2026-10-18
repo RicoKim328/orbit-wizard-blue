@@ -2,9 +2,9 @@
 
 ## §A Context
 
-Rewrite the Git-executing instructions in five MoAI agent definitions, seven workflow files, and `CLAUDE.md` so that sub-agents return a proposed repository action and the orchestrator (Astra, `AGENTS.md:5,13`) executes it; keep `manager-git` as a proposal-only agent with no `Bash` and no `bypassPermissions`; add a project rule that overrides the Frozen Route A/B text in `spec-workflow.md` without editing it. 14 files in all (13 edited, 1 new). Instruction text, one rule file and one frontmatter only; no enforcement mechanism. Direction decided by the user: project-local hardening plus upstream issue https://github.com/modu-ai/moai-adk/issues/1827 (item 5).
+Rewrite the Git-executing instructions in five MoAI agent definitions, seven workflow files, and `CLAUDE.md` so that sub-agents return a proposed repository action and the orchestrator (`AGENTS.md:5,13`) executes it; keep `manager-git` as a proposal-only agent with no `Bash` and no `bypassPermissions`; add a project rule that overrides the Frozen Route A/B text in `spec-workflow.md` without editing it. 14 files in all (13 edited, 1 new). Instruction text, one rule file and one frontmatter only; no enforcement mechanism. Direction decided by the user: project-local hardening plus upstream issue https://github.com/modu-ai/moai-adk/issues/1827 (item 5).
 
-User decisions applied in iteration 2: (1) track only the files this SPEC modifies; (2) Astra is the MoAI main session (the orchestrator), and `manager-git` is kept as proposal-only; (3) `spec-workflow.md` is not edited and an override rule is added at `.claude/rules/project/git-ownership.md` (path chosen after reading the rule layout: existing rules live under `.claude/rules/moai/<area>/` with YAML frontmatter and `paths:` globs, and the override is placed outside the `moai/` namespace without `paths:` so it is not path-scoped).
+User decisions applied in iteration 2: (1) track only the files this SPEC modifies; (2) the orchestrator is the MoAI main session, and `manager-git` is kept as proposal-only; (3) `spec-workflow.md` is not edited and an override rule is added at `.claude/rules/project/git-ownership.md` (path chosen after reading the rule layout: existing rules live under `.claude/rules/moai/<area>/` with YAML frontmatter and `paths:` globs, and the override is placed outside the `moai/` namespace without `paths:` so it is not path-scoped).
 
 ## §B Known Issues / Evidence Base
 
@@ -29,7 +29,7 @@ Read by the author on 2026-10-18:
 
 - Instruction-text edits, one new rule file, and `manager-git.md` frontmatter only; keep each agent's non-Git responsibilities as written.
 - Use the single defined term "proposed repository action" and the label "Proposed repository action" for fenced blocks; use the exact prohibition sentence of REQ-GITOWN-004 (the acceptance greps match them literally).
-- Do not edit `spec-workflow.md`, `AGENTS.md`, hooks, `git-strategy.yaml`, or the binary.
+- Do not edit `spec-workflow.md`, hooks, `git-strategy.yaml`, or the binary.
 - Sub-agents run no `git`/`gh`; the coordinator runs every command in `acceptance.md`.
 - `development_mode: tdd`: AC-GITOWN-001 to -004 and -007 to -010 are the tests (RED baseline first, then GREEN); AC-GITOWN-011 is the behavioral probe.
 
@@ -83,7 +83,7 @@ Run AC-GITOWN-001 to AC-GITOWN-013 in §F order (coordinator), recording verbati
 
 - Do not add a carve-out that lets an agent run `git` or `gh`, even read-only (`AGENTS.md:13`).
 - Do not paraphrase the defined term, the label, or the prohibition sentence; the greps match them literally.
-- Do not edit `AGENTS.md` or `spec-workflow.md`; the override rule is the mechanism.
+- Do not edit `spec-workflow.md`; the override rule is the mechanism. `AGENTS.md` may change only by replacing the name "Astra" with "the orchestrator" (post-run user decision).
 - Do not widen the edit to agents or files that have no Git instruction.
 - Do not `git add -A`; stage by pathspec.
 

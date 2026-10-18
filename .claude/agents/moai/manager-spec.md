@@ -52,7 +52,7 @@ Scope boundaries — what this agent does and does NOT own — are stated once i
 
 ## Delegation Protocol
 
-- Repository operations (branch, commit, PR, issue): return a proposed repository action — the file list, the commit subject and body, the target branch, and the exact commands, in a fenced block preceded by the label "Proposed repository action" — and the orchestrator runs it. Only the orchestrator (Astra) runs git or gh; ask the orchestrator for repository information or actions.
+- Repository operations (branch, commit, PR, issue): return a proposed repository action — the file list, the commit subject and body, the target branch, and the exact commands, in a fenced block preceded by the label "Proposed repository action" — and the orchestrator runs it. Only the orchestrator runs git or gh; ask the orchestrator for repository information or actions.
 - Domain consultation (backend / frontend / devops): recommend a per-spawn `Agent(general-purpose)` specialist — Step 6 below carries the keyword triggers, and `archived-agent-rejection.md` §C rows 7-10 the migration mapping
 
 ## SPEC vs Report Classification

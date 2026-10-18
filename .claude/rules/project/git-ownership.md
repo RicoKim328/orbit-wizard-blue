@@ -4,9 +4,9 @@ description: Orchestrator-only Git and GitHub ownership. Sub-agents return propo
 
 # Git Ownership (project rule)
 
-Only the orchestrator (Astra) runs git or gh; ask the orchestrator for repository information or actions.
+Only the orchestrator runs git or gh; ask the orchestrator for repository information or actions.
 
-In this project the orchestrator is the MoAI main session (Astra in `AGENTS.md`). Sub-agents run no `git` or `gh` command, including read-only ones, and perform no repository operation through scripts, APIs, or other indirect means. This covers staging, commits, branches, worktrees, fetch, pull, push, merges, tags, and pull requests or issues.
+In this project the orchestrator is the MoAI main session. Sub-agents run no `git` or `gh` command, including read-only ones, and perform no repository operation through scripts, APIs, or other indirect means. This covers staging, commits, branches, worktrees, fetch, pull, push, merges, tags, and pull requests or issues.
 
 ## Proposed repository action
 
