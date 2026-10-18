@@ -2,7 +2,7 @@
 id: SPEC-ENV-001
 title: "Stop overriding PATH with a machine-specific list in shared Claude settings"
 version: "0.3.0"
-status: draft
+status: implemented
 created: 2026-10-18
 updated: 2026-10-18
 author: Rico

@@ -51,4 +51,18 @@ run_status: partial. AC-ENV-001, -002, -003, -005, -006, -007 pass (AC-ENV-005 a
 
 ## §E.4 Sync-phase Audit-Ready Signal
 
-_<pending sync-phase>_
+Sync date 2026-10-18, coordinator-run, Tier S, Route A (single sync commit on the current branch `worktree-spec-tooling`; `github.spec_git_workflow: main_direct`, no PR, no `manager-git` spawn).
+
+Fresh checks on the sync tree (HEAD `bfef2f7`):
+- `.claude/settings.json` and `.gitignore` are tracked (`git ls-files`); `grep -n '"PATH"' .claude/settings.json` finds nothing (exit 1); the `env` block holds five keys and no `PATH`.
+- `.claude/settings.local.json` is ignored with `core.excludesFile=/dev/null` (exit 0); `.claude/settings.json` is not ignored (exit 1).
+- `~/.claude/settings.json` carries no `"PATH"` entry (count 0), matching the AC-ENV-005 re-run in §E.2.
+- `ruff check src tests tools`: All checks passed.
+- `QT_QPA_PLATFORM=offscreen ORBIT_WIZARD_DISABLE_3D=1 python -m pytest -q`: 169 passed, 4 warnings (Python sources untouched by this SPEC; run to confirm no regression).
+
+Documentation scope: `README.md` and the repository docs make no mention of `settings.json` or `PATH`, and no `CHANGELOG` exists, so no product docs changed. Only SPEC bookkeeping changed: `spec.md` frontmatter `status: draft` -> `implemented` (`updated` unchanged, same day) and this section. The frontmatter had not been moved to `in-progress` during the run phase, so this commit carries both transitions.
+
+Carried-over gaps (not closed by sync): AC-ENV-004 (the `claude -p` probe was taken over by the Stop review gate; AC-ENV-005's hook probe is the deterministic stand-in) and AC-ENV-008 (`moai update` treatment not measured; the sandbox cannot redirect `HOME`). Risk R1 stays open; the measurement command is recorded in §E.2. Status stays `implemented`, not `completed`, until the branch is merged and those gaps are accepted or measured.
+
+sync_status: audit-ready
+sync_complete_at: 2026-10-18
