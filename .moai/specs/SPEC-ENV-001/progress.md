@@ -27,11 +27,26 @@ plan_complete_at: 2026-10-18
 
 ## §E.2 Run-phase Evidence
 
-_<pending run-phase>_
+Run date 2026-10-18. `base_sha: b28cbe1449664ee1a0a99668679b0bb14a4344b6`. Pre-change copy: `$SCRATCH/settings.before.json` (`$SCRATCH` = the job scratch directory, outside any repository). Coordinator-run.
+
+`$LAUNCH_PATH` (provenance: user-supplied, from an interactive terminal):
+`/home/rico/go/bin:/home/rico/.local/bin:/home/rico/.local/bin:/home/rico/.nvm/versions/node/v24.19.0/bin:/home/rico/.local/bin:/home/rico/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin`
+
+- AC-ENV-002 PASS: `PATH="$LAUNCH_PATH" command -v moai` printed `/home/rico/.local/bin/moai`; `grep -c -F 'command -v moai'` printed `chain-event.sh:1`, `handle-multi-review-gate.sh:2`, `handle-codex-review-gate.sh:2`.
+- AC-ENV-001 PASS. RED first (original file): `True` / `False`. After the edit: `False` / `True`; `diff settings.before.json settings.json | grep -c '^[<>]'` printed `3`.
+- AC-ENV-003 PASS. RED first: line 355 matched, `exit=0`. After: `exit=1`.
+- AC-ENV-006 PASS. RED first: `git -c core.excludesFile=/dev/null check-ignore -q .claude/settings.local.json` gave `exit=1`; after adding one line to `.gitignore` (commit `71249a1`) it gave `exit=0`; the diff holds one added line and no removed line.
+- Replace versus merge: **replace**. Baseline hook probe (original `env` block, launched with `env PATH="$REPO/.venv/bin:$LAUNCH_PATH"`) wrote a PATH whose first entry is `/home/rico/.local/bin`, the override literal.
+- AC-ENV-005 **FAIL on this machine, root cause outside this SPEC's files**: after the change the hook still saw `/home/rico/.local/bin:/home/rico/go/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin` as its PATH. The user-level file `~/.claude/settings.json:18` carries the same `"PATH"` literal and overrides the inherited PATH for every project. The project-level change is correct and necessary but not sufficient here. Removing the user-level entry is outside this SPEC's scope (shared repository files only) and needs the user's decision.
+- AC-ENV-004 Gap: a `claude -p` probe inside the project was taken over by the Stop review gate (it tried unrelated review fixes and printed no PATH lines). Not reported as a pass. The deterministic hook probe above stands in for it; it is subject to the same user-level override.
+- AC-ENV-008 Gap: this session cannot redirect `HOME` (the sandbox refuses a `HOME=` prefix), and running `moai update` against the real home was judged unsafe. The scratch copy was built (160 files); no update was run. To measure: `cd <scratch copy> && HOME=<empty dir> moai update --templates-only --no-hooks --yes`, then `cmp` the settings file and check `'PATH' in env`.
+- Protected-file record: `sha256sum` of 43 hook scripts plus `.claude/settings.local.json` (44 lines); `sha256sum -c` reported 44 `OK`. Their mtimes (2026-10-17) precede this run, so they were not modified. The record was taken after the settings edit rather than before it, but none of these files was edited in this run.
+- Observed side effect (R2): the baseline session's SessionEnd hook of the Codex plugin failed with `SyntaxError: Unexpected token '?'` because the override puts Node v12 first.
+- Quality-gate note: the commit hook runs `pytest` without `QT_QPA_PLATFORM=offscreen`, so the GUI tests abort; with the variables set, `169 passed`. The hook configuration is outside this SPEC.
 
 ## §E.3 Run-phase Audit-Ready Signal
 
-_<pending run-phase>_
+run_status: partial. AC-ENV-001, -002, -003, -006 pass; AC-ENV-007 is checked after the commit. AC-ENV-005 fails because of a user-level `PATH` override in `~/.claude/settings.json:18`; AC-ENV-004 and -008 are Gaps.
 
 ## §E.4 Sync-phase Audit-Ready Signal
 
