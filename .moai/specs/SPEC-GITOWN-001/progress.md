@@ -7,12 +7,12 @@ Plan-phase notes (authoring session 2026-10-18, iteration 1):
 - Not verified: how `moai update` treats edited files; what consumes the `git-strategy.yaml` automation keys.
 
 Iteration 2 (2026-10-18), addressing the plan-audit report `.moai/reports/plan-audit/SPEC-TOOLING-audit-2026-10-18.md`:
-- X-1: all clarification markers removed from plan.md. Answered by user decisions: coordinator identity (Astra = the MoAI orchestrator), future of `manager-git` (kept, proposal-only), Frozen zone (not edited; override rule), tracking scope (the 14 files). Measurements moved to plan §C with ACs: `moai update` (AC-GITOWN-013), rule loading (AC-GITOWN-011). Deferred: `git-strategy.yaml`, technical guard, roster note. The one remaining decision (removing `Bash`/`bypassPermissions` from `manager-git`, REQ-GITOWN-005) was decided by the user on 2026-10-18; no open decisions remain.
+- X-1: all clarification markers removed from plan.md. Answered by user decisions: coordinator identity (the coordinator = the MoAI orchestrator), future of `manager-git` (kept, proposal-only), Frozen zone (not edited; override rule), tracking scope (the 14 files). Measurements moved to plan §C with ACs: `moai update` (AC-GITOWN-013), rule loading (AC-GITOWN-011). Deferred: `git-strategy.yaml`, technical guard, roster note. The one remaining decision (removing `Bash`/`bypassPermissions` from `manager-git`, REQ-GITOWN-005) was decided by the user on 2026-10-18; no open decisions remain.
 - X-2: single tracking scope in REQ-GITOWN-007; the "plus any file added" clause is deleted from AC-GITOWN-012.
 - X-4: AC-GITOWN-013 always performs the real scratch update with an isolated `HOME` and decides from `cmp`.
 - X-5: Conventions mark ACs `[coordinator-run]` and state the coordinator runs all commands.
 - X-7: `related_specs` removed. X-8: the update-record REQ became a measurement AC. X-9: second-hand provenance reworded.
-- G-1: `tier: M`, acceptance.md added, REQ/AC counts within the Tier M ceilings (7 REQ, 13 AC), threshold 0.80. G-2: `spec-workflow.md` is not edited; REQ-GITOWN-003 adds `.claude/rules/project/git-ownership.md`; REQ-002 and the tracking set were adjusted (13 edited + 1 new = 14 files); AC-GITOWN-006 proves the Frozen file is untouched. G-3: inventory completed (`manager-git.md:96,119-120,127,160-162`; `manager-develop.md:81`; `sync/delivery.md:213-330`; `plan/spec-assembly.md:281,312-314`; extra hits from the regex re-scan: `run.md:51,152`, `plan.md:97`, `sync.md:52,126`, `sync/delivery.md:46,448`, `manager-develop.md:234`); AC-GITOWN-002 and -004 (Scan S) fail while imperative Git text remains. G-4: AC-GITOWN-010 (carve-out grep) and AC-GITOWN-011 (probe includes "run git status"). G-5: persona sentence now uses "orchestrator (Astra)" per user decision. G-6: AC-GITOWN-011 uses three trials in a scratch repo with no remote and no `gh` authentication. G-7: the "inside the Frozen paragraph" wording is removed; the SPEC no longer edits those lines. G-8: confirmed accurate by the audit.
+- G-1: `tier: M`, acceptance.md added, REQ/AC counts within the Tier M ceilings (7 REQ, 13 AC), threshold 0.80. G-2: `spec-workflow.md` is not edited; REQ-GITOWN-003 adds `.claude/rules/project/git-ownership.md`; REQ-002 and the tracking set were adjusted (13 edited + 1 new = 14 files); AC-GITOWN-006 proves the Frozen file is untouched. G-3: inventory completed (`manager-git.md:96,119-120,127,160-162`; `manager-develop.md:81`; `sync/delivery.md:213-330`; `plan/spec-assembly.md:281,312-314`; extra hits from the regex re-scan: `run.md:51,152`, `plan.md:97`, `sync.md:52,126`, `sync/delivery.md:46,448`, `manager-develop.md:234`); AC-GITOWN-002 and -004 (Scan S) fail while imperative Git text remains. G-4: AC-GITOWN-010 (carve-out grep) and AC-GITOWN-011 (probe includes "run git status"). G-5: persona sentence now uses "orchestrator". G-6: AC-GITOWN-011 uses three trials in a scratch repo with no remote and no `gh` authentication. G-7: the "inside the Frozen paragraph" wording is removed; the SPEC no longer edits those lines. G-8: confirmed accurate by the audit.
 - `plan_status` stays audit-ready: every finding is addressed or deferred with a reason above.
 
 Iteration 3 (2026-10-18), addressing `.moai/reports/plan-audit/SPEC-TOOLING-audit-2026-10-18-iter2.md`:
@@ -39,6 +39,7 @@ Run session 2026-10-18. base_sha: 6d87042e086624256ed751a32dee61552fabc580. Run 
 - AC-GITOWN-007: PASS. `grep -L -F` for the prohibition sentence over A5 printed nothing.
 - AC-GITOWN-008: PASS. frontmatter `grep -c -E 'Bash|bypassPermissions'` printed 0.
 - AC-GITOWN-009: PASS. `git diff --quiet 6d87042..HEAD -- AGENTS.md` exit=0.
+  - Amended after the run (user decision: the Astra name is a leftover of earlier Codex work): AGENTS.md now differs from base_sha by the name replacement only. Re-run of the amended AC-GITOWN-009 and -012: `grep -c -F Astra AGENTS.md` = 0; ownership-sentence grep = 1; `git diff --numstat <base_sha> -- AGENTS.md` = `3<TAB>3<TAB>AGENTS.md`; name-only diff excluding .moai/specs and AGENTS.md = 14 paths.
 - AC-GITOWN-010: PASS. carve-out grep over A5, W8 and the rule file: exit=1, no match.
 - AC-GITOWN-011: GAP. No live Claude Code probe session (three manager-git trials plus a fresh-session rule-loading probe) was run in this session; reported as a Gap, not a pass.
 - AC-GITOWN-012: PASS. `git ls-files --error-unmatch` on the 14 paths: 14, exit 0; `git status --porcelain --` on them: empty; `git diff --name-only 6d87042..HEAD -- . ':(exclude).moai/specs'`: exactly the 14 paths.
@@ -54,4 +55,32 @@ run_complete_at: 2026-10-18
 
 ## §E.4 Sync-phase Audit-Ready Signal
 
-_<pending sync-phase>_
+sync_complete_at: 2026-10-18
+sync_status: audit-ready
+sync_commit_sha: pending-backfill-orchestrator
+
+Verification (run by the orchestrator in the sync session; tree = HEAD fb4cbd9 plus the uncommitted "(Astra)" removal):
+
+- Claim: test suite passes. Command: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q --no-header -p no:cacheprovider`. Output: `169 passed, 4 warnings in 12.69s`, exit=0. Evidence: `.moai/state/verify/sync-gitown/pytest.txt`.
+- Claim: lint is clean. Command: `.venv/bin/python -m ruff check .`. Output: `All checks passed!`, exit=0. Evidence: `.moai/state/verify/sync-gitown/ruff.txt`.
+- Snapshot: `moai verify check --key-current` exit=1, "no snapshot recorded for the current working-tree key"; no snapshot was consumed, both commands above were re-executed.
+- Files outside `.md` changed: none. `CHANGELOG.md` does not exist and `README.md` has no Git-ownership content, so neither is edited.
+
+AC status (from §E.2): AC-GITOWN-001..010 and -012 PASS; AC-GITOWN-011 Gap (no live Claude Code probe session); AC-GITOWN-013 measured, negative (edits survive a plain `moai update` only while the version matches; a forced update restores the old text in 13 managed files).
+
+Sync-audit (sync-auditor, opus): verdict PASS-with-debt, weighted score about 80.6, harmonic mean about 80, must-pass dimensions Functionality and Security above threshold. It re-ran the Scan S, carve-out, frontmatter and rule-file checks (AC-001..005, 007, 008, 010 PASS), pytest `169 passed` and ruff clean. It ran no git or gh (project rule). Findings: F1 (blocking, resolved by this commit) the "(Astra)" removal was uncommitted, so AC-012 could not hold; F2 AC-006 `protected_sha256` record was not preserved; F3 `manager-git.md` and `delivery.md` proposed actions include `git checkout main`, `git reset --hard`, `git switch -c`, which the orchestrator must run in a worktree under `main-checkout-branch-guard.md`; F4 `acceptance.md` line 3 still names spec.md v0.2.0 (manager-spec owns it); F6 `manager-git.md` hard-codes `--squash` and mixes a slash command into a bash block; F7 "worktree-isolated branches" wording in `manager-lead.md` overlaps AGENTS.md "worktrees". F2-F4, F6 and F7 are optional follow-ups. Cross-model audit (`audit_multi`) was not run because its backends read uncommitted changes through git.
+Evidence files live in the primary checkout at `/home/rico/Desktop/Project/orbit-wizard-blue/.moai/state/verify/sync-gitown/` (pytest.txt, ruff.txt).
+
+Gaps:
+
+- AC-GITOWN-006 `protected_sha256` hash record was not preserved; only mtime evidence (no protected file changed after 2026-10-18 11:00) supports it, so it is a Gap, not a pass.
+- AC-GITOWN-011 behavioral probe (three manager-git trials and fresh-session rule loading) was not observed.
+- No verification snapshot existed to attribute against; the evidence above is this session's re-execution only.
+- `sync_commit_sha` is unknown until the sync commit lands; the orchestrator backfills it.
+
+Residual-risk:
+
+- A forced `moai update`, or a version bump that re-deploys templates, restores the pre-SPEC text in the 5 agents, 7 workflow files and CLAUDE.md; recovery is re-applying commit cbdf400. The project rule `.claude/rules/project/git-ownership.md` persists.
+- Rule adherence by live agents is untested (AC-GITOWN-011), so an agent could still attempt `git` or `gh`.
+- Executor-neutral Git wording remains in `delivery.md` and the `manager-git` trigger lists.
+- The Stop-hook review gate reported three out-of-scope defects in untracked Navigator utilities (`navigator-audit.sh` feature-table parsing and stale-override matching, `handle-session-start-navigator.sh` backslash escaping); they are untouched per REQ-GITOWN-007 and need a separate task.

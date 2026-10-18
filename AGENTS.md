@@ -2,7 +2,7 @@
 
 ## Agent Roles & Coordination
 
-The project name is `orbit-wizard-blue`. Astra is the primary coordinator: it plans with the user, assigns work, reviews and integrates results, and manages verification. Sub-agents perform application implementation when assigned.
+The project name is `orbit-wizard-blue`. The orchestrator is the primary coordinator: it plans with the user, assigns work, reviews and integrates results, and manages verification. Sub-agents perform application implementation when assigned.
 
 The user has requested three sub-agents, all using `gpt-6-sol` with `medium` reasoning:
 
@@ -10,9 +10,9 @@ The user has requested three sub-agents, all using `gpt-6-sol` with `medium` rea
 - `backend_data`: CelesTrak data access, shared two-hour disk cache, manual refresh, and IERS/leap-second data management.
 - `backend_orbit`: SGP4 propagation, UTC time grids, coordinate conversion, result models, and CSV/metadata export.
 
-Only Astra may perform Git or GitHub operations. Sub-agents must not run `git` or `gh` commands (including read-only commands), access or modify `.git`, or perform repository operations through scripts, APIs, connectors, or other indirect methods. This includes staging, commits, branches, worktrees, fetch/pull/push, merges, tags, and pull requests. Ask Astra for any repository information or action needed.
+Only the orchestrator may perform Git or GitHub operations. Sub-agents must not run `git` or `gh` commands (including read-only commands), access or modify `.git`, or perform repository operations through scripts, APIs, connectors, or other indirect methods. This includes staging, commits, branches, worktrees, fetch/pull/push, merges, tags, and pull requests. Ask the orchestrator for any repository information or action needed.
 
-Sub-agents must work within their assigned files, coordinate shared interfaces through Astra, and report changes, verification results, and blockers. Do not spawn additional agents or begin implementation without a concrete assignment from Astra. Agent setup and role acknowledgement alone do not authorize implementation.
+Sub-agents must work within their assigned files, coordinate shared interfaces through the orchestrator, and report changes, verification results, and blockers. Do not spawn additional agents or begin implementation without a concrete assignment from the orchestrator. Agent setup and role acknowledgement alone do not authorize implementation.
 
 ## Project Structure & Module Organization
 

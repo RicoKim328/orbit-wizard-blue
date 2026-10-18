@@ -20,7 +20,7 @@ skills:
 
 Prepare Git workflows — branch strategy, commit messages, PR content, merge and release sequences — as proposals. This agent is proposal-only: every staging, commit, branch, push, merge, tag, worktree, and PR or issue operation it would otherwise perform is returned to the orchestrator as a proposed repository action, and the orchestrator reviews and runs it.
 
-Only the orchestrator (Astra) runs git or gh; ask the orchestrator for repository information or actions.
+Only the orchestrator runs git or gh; ask the orchestrator for repository information or actions.
 
 ## Proposed Repository Action Format
 

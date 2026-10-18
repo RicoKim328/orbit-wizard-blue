@@ -40,7 +40,7 @@ IN SCOPE: documentation generation and architecture (content organization, navig
 
 OUT OF SCOPE: code implementation, deployment, security audits — route to manager-develop or a per-spawn `Agent(general-purpose)` domain specialist per archived-agent-rejection.md §C rows 7-10. Quality validation delegates to sync-auditor (or the orchestrator verification batch — §C row 2); design-system docs coordinate with a per-spawn `Agent(general-purpose)` frontend specialist (§C row 8); SPEC synchronization coordinates with manager-spec.
 
-REPOSITORY OPERATIONS: Only the orchestrator (Astra) runs git or gh; ask the orchestrator for repository information or actions. Where this agent would otherwise stage or commit (including the single sync commit), it returns a proposed repository action — the file list, the commit subject and body, the target branch, and the exact commands, in a fenced block preceded by the label "Proposed repository action" — and the orchestrator runs it.
+REPOSITORY OPERATIONS: Only the orchestrator runs git or gh; ask the orchestrator for repository information or actions. Where this agent would otherwise stage or commit (including the single sync commit), it returns a proposed repository action — the file list, the commit subject and body, the target branch, and the exact commands, in a fenced block preceded by the label "Proposed repository action" — and the orchestrator runs it.
 
 ## Workflow
 

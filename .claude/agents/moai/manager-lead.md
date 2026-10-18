@@ -214,7 +214,7 @@ OUT OF SCOPE:
 - SPEC body edits → return blocker report; orchestrator re-delegates to `manager-spec`.
 - Sync-phase documentation → orchestrator hands off to `manager-docs` after the run phase.
 - PR creation → the orchestrator runs every push and PR; for Tier L / `--pr` it can ask `manager-git` (proposal-only) to draft the branch and PR as a proposed repository action.
-- Repository operations (staging, commits, branches, worktrees, push, merge, PR) → return a proposed repository action — the file list, the commit subject and body, the target branch, and the exact commands, in a fenced block preceded by the label "Proposed repository action"; leaf workers do the same. Only the orchestrator (Astra) runs git or gh; ask the orchestrator for repository information or actions.
+- Repository operations (staging, commits, branches, worktrees, push, merge, PR) → return a proposed repository action — the file list, the commit subject and body, the target branch, and the exact commands, in a fenced block preceded by the label "Proposed repository action"; leaf workers do the same. Only the orchestrator runs git or gh; ask the orchestrator for repository information or actions.
 - Domain consultation (backend / frontend / devops) → leaf worker as `Agent(general-purpose)` with domain whitelist per `archived-agent-rejection.md` §C rows 7-10.
 - E1-E4 escalation → orchestrator spawns `super-advisor`; manager-lead returns its spawn-context rather than self-escalating.
 
