@@ -2,7 +2,7 @@
 id: SPEC-GITOWN-001
 title: "Align MoAI agent and workflow Git instructions with orchestrator-only Git ownership"
 version: "0.3.0"
-status: draft
+status: in-progress
 created: 2026-10-18
 updated: 2026-10-18
 author: Rico

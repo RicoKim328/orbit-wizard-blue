@@ -27,11 +27,30 @@ plan_complete_at: 2026-10-18
 
 ## §E.2 Run-phase Evidence
 
-_<pending run-phase>_
+Run session 2026-10-18. base_sha: 6d87042e086624256ed751a32dee61552fabc580. Run commit: cbdf400 (14 paths staged by pathspec; the pre-commit gate's pytest aborts in Qt without a display, so the commit ran with `QT_QPA_PLATFORM=offscreen`; the hook was not bypassed). Mode: serial, two manager-develop spawns (agents + rule; workflows + CLAUDE.md), both in isolated worktrees because the targets are untracked in the primary checkout; the coordinator copied the results back and ran every check below. No sub-agent ran git or gh.
+
+- RED baseline (Scan S, before edits, this tree): agents 29 hits (manager-git.md 27, manager-develop.md 1, manager-docs.md 1); workflows 31 hits (delivery.md 22, spec-assembly.md 6, run.md 2, plan.md 1). Saved in the session scratchpad (red_a5.txt, red_w8.txt).
+- AC-GITOWN-001: PASS. `grep -L -F 'proposed repository action'` over A5 printed nothing; removal greps printed 0 for all listed strings; `grep -c -i -E 'proposal-only|proposes? '` on manager-git.md printed 11.
+- AC-GITOWN-002: PASS. Scan S over A5 printed nothing (29 hits before).
+- AC-GITOWN-003: PASS. `grep -L` over W8 printed nothing; every listed `grep -c -F -e` printed 0.
+- AC-GITOWN-004: PASS. Scan S over W8 printed nothing (31 hits before).
+- AC-GITOWN-005: PASS. exit=0; `^paths:` count 0; the four phrases >= 1 (1, 4, 1, 2); proposal-only 1; 24 lines; Route A 3, Route B 2.
+- AC-GITOWN-006: PASS. `sha256sum -c` over the 148 recorded files (rules/moai, hooks, config sections, moai binary): 148 OK, 0 not OK.
+- AC-GITOWN-007: PASS. `grep -L -F` for the prohibition sentence over A5 printed nothing.
+- AC-GITOWN-008: PASS. frontmatter `grep -c -E 'Bash|bypassPermissions'` printed 0.
+- AC-GITOWN-009: PASS. `git diff --quiet 6d87042..HEAD -- AGENTS.md` exit=0.
+- AC-GITOWN-010: PASS. carve-out grep over A5, W8 and the rule file: exit=1, no match.
+- AC-GITOWN-011: GAP. No live Claude Code probe session (three manager-git trials plus a fresh-session rule-loading probe) was run in this session; reported as a Gap, not a pass.
+- AC-GITOWN-012: PASS. `git ls-files --error-unmatch` on the 14 paths: 14, exit 0; `git status --porcelain --` on them: empty; `git diff --name-only 6d87042..HEAD -- . ':(exclude).moai/specs'`: exactly the 14 paths.
+- AC-GITOWN-013: MEASURED (negative result, Gap). Scratch copy with isolated HOME. Plain `moai update --templates-only --no-hooks --yes` printed "Up to date, Skipping sync": all 14 files preserved, 0 files created. With `--force`: 13 managed files overwritten-or-merged (the 5 agents, the 7 workflow files, CLAUDE.md); `.claude/rules/project/git-ownership.md` preserved; no user-level state created in the isolated HOME. So the edits survive a normal update only while the version matches; a forced update, or a version bump that re-deploys templates, restores the old text. Restoring step: re-apply commit cbdf400 (`git show cbdf400 -- <path>` then checkout of the paths). The override rule outside the moai/ namespace persists.
+
+Residual: wording that sounds like Git work but names no executor remains (delivery.md frontmatter/heading "Git Operations and Delivery", trigger lists naming manager-git). The Stop-hook review gate also flagged out-of-scope findings in `.claude/hooks/moai/handle-codex-review-gate.sh` and `.claude/skills/moai-workflow-project/scripts/navigator-audit.sh` and `handle-session-start-navigator.sh`; not touched (REQ-GITOWN-007).
 
 ## §E.3 Run-phase Audit-Ready Signal
 
-_<pending run-phase>_
+run_status: audit-ready (AC-001..010 and -012 pass; AC-011 Gap; AC-013 measured, negative)
+run_commit_sha: cbdf400
+run_complete_at: 2026-10-18
 
 ## §E.4 Sync-phase Audit-Ready Signal
 
