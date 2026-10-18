@@ -2,7 +2,7 @@
 id: SPEC-HOOKS-001
 title: "Harden MoAI hook and script defects reported by the Codex review gate"
 version: "0.3.0"
-status: draft
+status: in-progress
 created: 2026-10-18
 updated: 2026-10-18
 author: Rico
