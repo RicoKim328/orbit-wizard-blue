@@ -57,7 +57,10 @@ run_complete_at: 2026-10-18
 
 sync_complete_at: 2026-10-18
 sync_status: audit-ready
-sync_commit_sha: pending-backfill-orchestrator
+sync_commit_sha: d30b015
+sync_branch: worktree-sync-gitown (not yet merged to main)
+
+F1 re-check after the sync commit (HEAD d30b015, this tree): `git diff --numstat 6d87042 -- AGENTS.md` printed `3<TAB>3<TAB>AGENTS.md` (AC-009 PASS); `git status --porcelain --` over the 5 agent files, the rule file and AGENTS.md printed nothing (AC-012 clean-tree condition PASS); `git diff --name-only 6d87042 HEAD -- . ':(exclude).moai/specs'` printed 15 paths = the 14 SPEC paths plus AGENTS.md (the post-run user amendment).
 
 Verification (run by the orchestrator in the sync session; tree = HEAD fb4cbd9 plus the uncommitted "(Astra)" removal):
 
