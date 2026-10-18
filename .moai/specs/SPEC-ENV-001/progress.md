@@ -38,6 +38,7 @@ Run date 2026-10-18. `base_sha: b28cbe1449664ee1a0a99668679b0bb14a4344b6`. Pre-c
 - AC-ENV-006 PASS. RED first: `git -c core.excludesFile=/dev/null check-ignore -q .claude/settings.local.json` gave `exit=1`; after adding one line to `.gitignore` (commit `71249a1`) it gave `exit=0`; the diff holds one added line and no removed line.
 - Replace versus merge: **replace**. Baseline hook probe (original `env` block, launched with `env PATH="$REPO/.venv/bin:$LAUNCH_PATH"`) wrote a PATH whose first entry is `/home/rico/.local/bin`, the override literal.
 - AC-ENV-005 **FAIL on this machine, root cause outside this SPEC's files**: after the change the hook still saw `/home/rico/.local/bin:/home/rico/go/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin` as its PATH. The user-level file `~/.claude/settings.json:18` carries the same `"PATH"` literal and overrides the inherited PATH for every project. The project-level change is correct and necessary but not sufficient here. Removing the user-level entry is outside this SPEC's scope (shared repository files only) and needs the user's decision.
+- AC-ENV-005 re-run **PASS** after the user approved removing `~/.claude/settings.json:18` (backup: `$SCRATCH/user-settings.before.json`; the file still parses, its `env` keeps `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` and `CLAUDE_DISABLE_PATH_WARNING`). The hook probe launched with `env PATH="$REPO/.venv/bin:$LAUNCH_PATH"` wrote a PATH whose first entry is `/home/rico/Desktop/Project/orbit-wizard-blue/.venv/bin`, and the nvm Node v24.19.0 directory is on it (5th entry). The FAIL above is superseded by this result.
 - AC-ENV-004 Gap: a `claude -p` probe inside the project was taken over by the Stop review gate (it tried unrelated review fixes and printed no PATH lines). Not reported as a pass. The deterministic hook probe above stands in for it; it is subject to the same user-level override.
 - AC-ENV-008 Gap: this session cannot redirect `HOME` (the sandbox refuses a `HOME=` prefix), and running `moai update` against the real home was judged unsafe. The scratch copy was built (160 files); no update was run. To measure: `cd <scratch copy> && HOME=<empty dir> moai update --templates-only --no-hooks --yes`, then `cmp` the settings file and check `'PATH' in env`.
 - Protected-file record: `sha256sum` of 43 hook scripts plus `.claude/settings.local.json` (44 lines); `sha256sum -c` reported 44 `OK`. Their mtimes (2026-10-17) precede this run, so they were not modified. The record was taken after the settings edit rather than before it, but none of these files was edited in this run.
@@ -46,7 +47,7 @@ Run date 2026-10-18. `base_sha: b28cbe1449664ee1a0a99668679b0bb14a4344b6`. Pre-c
 
 ## §E.3 Run-phase Audit-Ready Signal
 
-run_status: partial. AC-ENV-001, -002, -003, -006 pass; AC-ENV-007 is checked after the commit. AC-ENV-005 fails because of a user-level `PATH` override in `~/.claude/settings.json:18`; AC-ENV-004 and -008 are Gaps.
+run_status: partial. AC-ENV-001, -002, -003, -005, -006, -007 pass (AC-ENV-005 after the user-level `PATH` entry at `~/.claude/settings.json:18` was removed with the user's approval); AC-ENV-004 and -008 are Gaps.
 
 ## §E.4 Sync-phase Audit-Ready Signal
 
