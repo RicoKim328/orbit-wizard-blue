@@ -364,4 +364,16 @@ run_complete_at: 2026-10-18
 
 ## §E.4 Sync-phase Audit-Ready Signal
 
-_<pending sync-phase>_
+Sync date 2026-10-18, coordinator-run, Tier S, Route A (single sync commit on the current branch `worktree-spec-tooling`; no PR, no `manager-git` spawn).
+
+Fresh checks on the sync tree (HEAD `8a6336c`):
+- `bash -n` on the four hardened files: SYNTAX_OK; `git ls-files` lists all four as tracked; `grep -c "/home/rico"` on each: 0.
+- `ruff check src tests tools`: All checks passed.
+- `QT_QPA_PLATFORM=offscreen ORBIT_WIZARD_DISABLE_3D=1 python -m pytest -q`: 169 passed, 4 warnings (Python sources untouched by this SPEC; run to confirm no regression).
+
+Documentation scope: `README.md` and the repository docs make no mention of the hook scripts, and no `CHANGELOG` exists, so no product docs changed. Only SPEC bookkeeping changed: `spec.md` frontmatter `status: in-progress` -> `implemented` (`updated` unchanged, same day) and this section.
+
+Carried-over gap (not closed by sync): AC-HOOKS-007 (does `moai update` overwrite the four tracked files) was not measured as specified, see §E.2. Risk R1 stays open; recovery is `git checkout HEAD -- <four paths>`. Status stays `implemented`, not `completed`, until the branch is merged and that gap is accepted or measured.
+
+sync_status: audit-ready
+sync_complete_at: 2026-10-18
